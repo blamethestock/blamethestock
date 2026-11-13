@@ -186,7 +186,7 @@ test('a −100% stretch does not break the words', () => {
 test('one grey line instead of numbers: failed fetch, bad pieces, or pieces that don\'t match the card', () => {
   const pieces = mk([[false, 17.5, -0.081, -0.004], [true, 6.5, -0.042, -0.046]]);
   const r = res(pieces);
-  const fail = { ok: false, text: 'Off-hours split unavailable right now.' };
+  const fail = { ok: false, text: "We couldn't check market hours right now." };
   eq(offHoursView({ ok: false, code: 'rpc-failed' }, r), fail);
   eq(offHoursView(null, r), fail);
   eq(offHoursView({ ok: true, pieces }, { ok: false, code: 'stale' }), fail);
