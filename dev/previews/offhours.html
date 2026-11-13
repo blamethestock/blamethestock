@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Off-hours preview · Blame the Stock (dev)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<link rel="stylesheet" href="../../site/src/ui/card.css">
+<style>
+  /* Dev-only page: fake data, real card code (site/src/ui/card.js) and real words (features/offhours.js). */
+  :root {
+    --bg: #000; --fg: #fff; --grey: #8b8b8b; --line: #262626;
+    --pair: #2433FF; --coin: #FF4F1F; --radius: 20px;
+    --font: "Archivo", "Arial Narrow", Arial, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #000; color: #fff; font-family: var(--font); font-size: 16px; }
+  .bar {
+    position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+    padding: 12px 16px; background: rgba(0,0,0,.92); border-bottom: 1px solid #262626; font-size: 13px;
+  }
+  .bar h1 { margin: 0 12px 0 0; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+  .bar label { color: #8b8b8b; display: inline-flex; gap: 6px; align-items: center; }
+  .bar select, .bar button {
+    font: inherit; color: #fff; background: #111; border: 1px solid #333; border-radius: 999px; padding: 6px 12px; cursor: pointer;
+  }
+  .bar p { margin: 0; color: #8b8b8b; }
+  main { padding: 8px 16px 120px; }
+  .row { padding: 28px 0; border-bottom: 1px solid #1a1a1a; }
+  .row-head { margin-bottom: 14px; }
+  .row-head h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+  .row-head p { margin: 4px 0 0; color: #8b8b8b; font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .frames { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .frame { flex: none; max-width: 100%; }
+  .frame-desk { width: 920px; }
+  .frame-phone { width: 375px; padding: 0 16px; outline: 1px dashed #222; }
+  .frame-cap { font-size: 11px; color: #555; margin: 0 0 6px; letter-spacing: .08em; text-transform: uppercase; }
+  body[data-layout="desktop"] .frame-phone { display: none; }
+  body[data-layout="phone"] .frame-desk { display: none; }
+  body[data-layout="phone"] .frame-phone { width: 100%; max-width: 375px; }
+  .warn { margin: 16px; padding: 12px 16px; border: 1px solid #FF4F1F; border-radius: 12px; }
+</style>
+</head>
+<body data-layout="both">
+  <div class="bar">
+    <h1>Off-hours preview</h1>
+    <label>Layout
+      <select id="layout">
+        <option value="both">Desktop + phone</option>
+        <option value="desktop">Desktop only</option>
+        <option value="phone">Phone only</option>
+      </select>
+    </label>
+    <button type="button" id="replay">Replay (loading, then the block)</button>
+    <p>Fake prices. The card and the off-hours words are the real site code.</p>
+  </div>
+  <main id="list"></main>
+
+<script type="module">
+import { SETTINGS } from '../../site/settings.js';
+import { buildResult } from '../../site/src/core/verdict.js';
+import { renderResult, renderOffHours } from '../../site/src/ui/card.js';
+import { splitWindow } from '../../site/src/features/markethours.js';
+import { piecesFromPrices, offHoursView } from '../../site/src/features/offhours.js';
+
+const list = document.getElementById('list');
+const W = SETTINGS.wording.offHours;
+const u = (iso) => Date.parse(iso) / 1000;
+const H = 3600;
+
+const COINS = {
+  AI: { address: '0x2e8c31162b855a2ffa90f6f8634643ad6f111e18', symbol: 'AI', name: 'AI' },
+  ZOLVA: { address: '0x8e04549484d0612be8373a0263b11928a5f7681f', symbol: 'ZOLVA', name: 'Zolva' },
+  STRATEGY: { address: '0x168661c52e5922288dfb2b3f323b6cf90eb21e18', symbol: 'STRATEGY', name: 'Strategy' },
+  SHRP: { address: '0xb961886115fb9e4f732e20e89efd6d0406c3527f', symbol: 'SHRP', name: 'Sharp' },
+  ORBIO: { address: '0x1111111111111111111111111111111111111111', symbol: 'ORBIO', name: 'Orbio' },
+};
+const PAIRS = {
+  NVDA: { address: '0x3333333333333333333333333333333333333333', symbol: 'NVDA', kind: 'stock' },
+  MSTR: { address: '0x6666666666666666666666666666666666666666', symbol: 'MSTR', kind: 'stock' },
+  ETH: { address: '0x0000000000000000000000000000000000000000', symbol: 'ETH', kind: 'eth' },
+  ORBIO: { address: '0x1111111111111111111111111111111111111111', symbol: 'ORBIO', kind: 'coin' },
+  USDG: { address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', symbol: 'USDG', kind: 'stable' },
+};
+const WIN = { '1h': H, '6h': 6 * H, '24h': 24 * H, '7d': 168 * H };
+
+// moves: one [r, q] per stretch (coin vs pair, pair in dollars), cycled. Returns everything a row needs.
+function scenario({ coin, pair, window, end, moves }) {
+  const start = end - WIN[window];
+  const split = splitWindow(start, end);
+  const dollar = pair.kind === 'stable';
+  const pts = [{ coinInPair: 0.0123, pairUsd: dollar ? null : 187.5 }];
+  split.pieces.forEach((p, i) => {
+    const [r, q] = moves[i % moves.length];
+    const a = pts[pts.length - 1];
+    pts.push({ coinInPair: a.coinInPair * (1 + r), pairUsd: dollar ? null : a.pairUsd * (1 + q) });
+  });
+  const first = pts[0], last = pts[pts.length - 1];
+  const pi = {
+    ok: true, coin, pair,
+    pool: { id: '0xpool', dex: 'uniswap-v4', label: coin.symbol + '/' + pair.symbol, pairSideUsd: 250000, createdAt: end - 90 * 86400, source: 'dexscreener' },
+    window, windowSeconds: WIN[window],
+    start: { block: 112293925, time: start }, end: { block: 113120530, time: end },
+    sinceLaunch: false,
+    coinInPair: { start: first.coinInPair, end: last.coinInPair },
+    pairUsd: dollar ? null : { start: first.pairUsd, end: last.pairUsd },
+    pairVia: null, tradedInWindow: true,
+  };
+  const result = buildResult(pi, SETTINGS);
+  const pieces = piecesFromPrices(split, pts);
+  return { result, off: { ok: true, pieces } };
+}
+
+const ROWS = [
+  { title: '24h · stock pair · the brief\'s example (mostly closed)',
+    s: { coin: COINS.AI, pair: PAIRS.NVDA, window: '24h', end: u('2026-11-13T05:37:28Z'), moves: [[-0.05, -0.002], [0.002, -0.046], [-0.035, -0.002]] } },
+  { title: '24h · ETH pair · went one way, then the other',
+    s: { coin: COINS.ZOLVA, pair: PAIRS.ETH, window: '24h', end: u('2026-11-13T05:37:28Z'), moves: [[-0.06, -0.01], [0.05, 0.004], [-0.04, -0.012]] } },
+  { title: '7d · ETH pair · eleven stretches (five sessions)',
+    s: { coin: COINS.ZOLVA, pair: PAIRS.ETH, window: '7d', end: u('2026-11-13T05:37:28Z'),
+      moves: [[-0.03, -0.01], [-0.004, 0.003], [-0.025, -0.008], [0.006, 0.002], [-0.02, 0.004], [-0.003, -0.002]] } },
+  { title: '7d · stock pair · Thanksgiving week (four sessions, Friday closes at 1 PM)',
+    s: { coin: COINS.STRATEGY, pair: PAIRS.MSTR, window: '7d', end: u('2026-11-29T17:00:00Z'),
+      moves: [[0.01, -0.002], [-0.012, -0.03], [0.004, 0.001], [-0.01, -0.025]] } },
+  { title: '24h · coin pair · a weekend (closed the whole time)',
+    s: { coin: COINS.SHRP, pair: PAIRS.ORBIO, window: '24h', end: u('2026-11-15T15:00:00Z'), moves: [[-0.08, -0.12]] } },
+  { title: '6h · dollar pair · inside one session (open the whole time)',
+    s: { coin: COINS.ORBIO, pair: PAIRS.USDG, window: '6h', end: u('2026-11-12T20:30:00Z'), moves: [[0.064, 0]] } },
+  { title: '24h · stock pair · barely moved',
+    s: { coin: COINS.AI, pair: PAIRS.NVDA, window: '24h', end: u('2026-11-13T05:37:28Z'), moves: [[0.001, 0.0005], [-0.004, 0.001], [0.0005, -0.001]] } },
+  { title: 'Loading', state: 'loading', s: { coin: COINS.AI, pair: PAIRS.NVDA, window: '24h', end: u('2026-11-13T05:37:28Z'), moves: [[-0.05, 0]] } },
+  { title: 'Failed: one grey line, no numbers', state: 'failed', s: { coin: COINS.ZOLVA, pair: PAIRS.ETH, window: '24h', end: u('2026-11-13T05:37:28Z'), moves: [[-0.05, 0]] } },
+];
+
+function draw(row, el, { replay = false } = {}) {
+  const { result, off } = scenario(row.s);
+  renderResult(el, result, { settings: SETTINGS, offHours: true, prepareImage: false, enter: false, onWindow: () => {} });
+  const loading = { state: 'loading', title: W.title, text: W.checking };
+  if (row.state === 'loading') { renderOffHours(el, loading); return; }
+  const final = row.state === 'failed' ? offHoursView({ ok: false, code: 'rpc-failed' }, result) : offHoursView(off, result, SETTINGS);
+  if (!replay) { renderOffHours(el, final); return; }
+  renderOffHours(el, loading);
+  setTimeout(() => renderOffHours(el, final), 900);
+}
+
+function makeRow(row, i) {
+  const sec = document.createElement('section');
+  sec.className = 'row';
+  const head = document.createElement('div');
+  head.className = 'row-head';
+  const h = document.createElement('h2');
+  h.textContent = row.title;
+  head.append(h);
+  if (!row.state) {
+    const { result, off } = scenario(row.s);
+    const v = offHoursView(off, result, SETTINGS);
+    const p = document.createElement('p');
+    p.textContent = `key ${v.key} · card c ${(result.c * 100).toFixed(3)}% q ${(result.q * 100).toFixed(3)}% · ` +
+      `closed c ${(v.totals.cClosed * 100).toFixed(3)}% open c ${(v.totals.cOpen * 100).toFixed(3)}% · closed ${(v.totals.closedShare * 100).toFixed(1)}% of the time`;
+    head.append(p);
+  }
+  const frames = document.createElement('div');
+  frames.className = 'frames';
+  for (const kind of ['desk', 'phone']) {
+    const f = document.createElement('div');
+    f.className = `frame frame-${kind}`;
+    const cap = document.createElement('p');
+    cap.className = 'frame-cap';
+    cap.textContent = kind === 'desk' ? 'desktop (920)' : 'phone (375, 16px gutter)';
+    const out = document.createElement('section');
+    out.className = 'result';
+    out.id = `result-${i}-${kind}`;
+    f.append(cap, out);
+    frames.append(f);
+  }
+  sec.append(head, frames);
+  return sec;
+}
+
+function renderAll(opts) {
+  list.querySelectorAll('.row').forEach((sec, i) => {
+    for (const el of sec.querySelectorAll('.result')) {
+      try { draw(ROWS[i], el, opts); } catch (e) { el.innerHTML = '<p class="warn"></p>'; el.firstChild.textContent = String(e); }
+    }
+  });
+}
+
+ROWS.forEach((row, i) => list.append(makeRow(row, i)));
+renderAll();
+document.getElementById('replay').addEventListener('click', () => renderAll({ replay: true }));
+document.getElementById('layout').addEventListener('change', (e) => { document.body.dataset.layout = e.target.value; });
+const qs = new URLSearchParams(location.search);
+if (qs.get('layout')) { document.getElementById('layout').value = qs.get('layout'); document.body.dataset.layout = qs.get('layout'); }
+window.__offPreview = { ROWS, scenario };
+</script>
+</body>
+</html>

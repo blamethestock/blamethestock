@@ -1,0 +1,184 @@
+/* Blame the Stock: the Stock-Paired Board (filled by src/features/board.js).
+   The section stays hidden unless SETTINGS.features.stockBoard is on, so none of this shows otherwise.
+   Colours come from the page tokens in styles.css; blue/vermilion only in the mini bars and their key. */
+
+.board-body { margin-top: 32px; }
+
+/* ---- Intro + window tabs ---------------------------------------------------------------------- */
+.board-top {
+  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
+  gap: 20px 32px;
+}
+.board-lede { min-width: 0; max-width: 44ch; }
+.board-intro { margin: 0; font-size: clamp(19px, 2vw, 24px); line-height: 1.35; color: var(--fg); }
+.board-hint { margin: 10px 0 0; font-size: 15px; line-height: 1.4; color: var(--grey); }
+
+.board-tabs {
+  display: inline-flex; flex: none; gap: 2px; padding: 3px;
+  border: 1px solid var(--line); border-radius: 999px;
+}
+.board-tab {
+  appearance: none; -webkit-appearance: none; margin: 0; border: 0;
+  min-width: 44px; padding: 8px 13px;
+  border-radius: 999px; background: transparent; color: var(--grey);
+  font: inherit; font-size: 13px; font-weight: 600; line-height: 1; letter-spacing: .02em;
+  font-variant-numeric: tabular-nums; cursor: pointer;
+  transition: color .15s, background-color .2s;
+}
+.board-tab:hover { color: var(--fg); }
+.board-tab[aria-selected="true"] { background: var(--fg); color: #000; cursor: default; }
+.board-tab:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+
+/* ---- The card holding the list ------------------------------------------------------------------ */
+.board-card {
+  container: board / inline-size;
+  margin-top: 24px;
+  padding: 6px clamp(16px, 3vw, 28px) clamp(18px, 3vw, 24px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.board-panel { min-height: 120px; }
+.board-panel:focus { outline: none; }
+
+/* Column heads and rows share one grid: rank | coin | bar | c & q | own move */
+.board-head, .board-row {
+  display: grid;
+  grid-template-columns: 2.2em minmax(0, 1.25fr) minmax(64px, .8fr) minmax(0, 1.35fr) minmax(7.5em, auto);
+  grid-template-areas: "rank coin bar small own";
+  align-items: center;
+  column-gap: clamp(12px, 2.4cqi, 24px);
+}
+.board-head {
+  padding: 14px 0 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px; font-weight: 600; line-height: 1.2; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--grey);
+}
+.board-head-rank { grid-area: rank; }
+.board-head-coin { grid-area: coin; }
+.board-head-own { grid-area: own; text-align: right; }
+
+.board-list { list-style: none; margin: 0; padding: 0; }
+.board-item + .board-item { border-top: 1px solid var(--line); }
+.board-row {
+  appearance: none; -webkit-appearance: none;
+  width: calc(100% + 20px); margin: 0 -10px; padding: 14px 10px;
+  border: 0; border-radius: 12px; background: transparent; color: var(--fg);
+  font: inherit; text-align: left; cursor: pointer;
+  transition: background-color .15s;
+}
+.board-row:hover { background: #0e0e0e; }
+.board-row:active { background: #151515; }
+.board-row:focus-visible { outline: 2px solid var(--fg); outline-offset: -2px; }
+
+.board-rank {
+  grid-area: rank;
+  font-size: 14px; color: var(--grey); font-variant-numeric: tabular-nums;
+}
+.board-coin { grid-area: coin; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.board-sym {
+  min-width: 0; max-width: 100%;
+  font-size: clamp(17px, 2.6cqi, 21px); font-weight: 700; line-height: 1.2; letter-spacing: -.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.board-vs { font-size: 13px; color: var(--grey); white-space: nowrap; }
+.board-tag { flex-basis: 100%; font-size: 12px; color: var(--grey); letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+
+.board-own {
+  grid-area: own; justify-self: end;
+  font-size: clamp(22px, 3.6cqi, 30px); font-weight: 700; line-height: 1; letter-spacing: -.02em;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.board-arrow { display: inline-block; margin-right: .14em; font-weight: 500; }
+
+.board-small {
+  grid-area: small; display: flex; flex-wrap: wrap; gap: 2px 16px; min-width: 0;
+  font-size: 13px; line-height: 1.35; color: var(--fg); font-variant-numeric: tabular-nums;
+}
+.board-small-item { white-space: nowrap; }
+.board-small-label { color: var(--grey); }
+
+/* Mini split bar, like the card's: blue = the stock's part, vermilion = the coin's own part */
+.board-bar { grid-area: bar; display: flex; gap: 2px; height: 8px; border-radius: 999px; overflow: hidden; }
+.board-bar.is-whole { gap: 0; }
+.board-bar.is-flat { height: 4px; background: var(--line-strong, #3a3a3a); }
+.board-seg { display: block; flex: 1 1 0; min-width: 0; }
+.board-seg-pair { background: var(--pair); }
+.board-seg-coin { background: var(--coin); }
+
+/* Foot: key, notes, time */
+.board-foot { padding-top: 16px; border-top: 1px solid var(--line); }
+.board-legend { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0; font-size: 13px; color: var(--grey); }
+.board-legend span { display: inline-flex; align-items: center; gap: 8px; }
+.board-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.board-dot-pair { background: var(--pair); }
+.board-dot-coin { background: var(--coin); }
+.board-note { margin: 10px 0 0; font-size: 13px; line-height: 1.45; color: var(--grey); }
+.board-asof { margin: 10px 0 0; font-size: 13px; line-height: 1.3; color: var(--grey); }
+.board-listnote { margin: 16px 0 0; max-width: 70ch; font-size: 14px; line-height: 1.5; color: var(--grey); }
+
+/* ---- Loading (spinner line + calm skeleton) ------------------------------------------------------ */
+.board-loading {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0; padding: 18px 0 14px;
+  font-size: 15px; line-height: 1.4; color: var(--grey);
+}
+.board-spin {
+  flex: none; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--line-strong, #3a3a3a); border-top-color: var(--fg);
+  animation: board-spin .8s linear infinite;
+}
+@keyframes board-spin { to { transform: rotate(360deg); } }
+.board-skels { display: grid; gap: 10px; padding-bottom: 6px; }
+.board-skel {
+  display: block; height: 44px; border-radius: 10px; background: #121212;
+  animation: board-pulse 1.6s ease-in-out infinite alternate;
+}
+@keyframes board-pulse { from { opacity: .45; } to { opacity: 1; } }
+
+/* ---- Couldn't load ------------------------------------------------------------------------------ */
+.board-fail { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; padding: 22px 0 6px; }
+.board-error { margin: 0; font-size: clamp(19px, 3cqi, 24px); font-weight: 600; line-height: 1.3; }
+.board-again {
+  appearance: none; -webkit-appearance: none; margin: 0;
+  min-height: 44px; padding: 0 20px;
+  border: 1px solid var(--line-strong, #3a3a3a); border-radius: 999px;
+  background: transparent; color: var(--fg);
+  font: inherit; font-size: 15px; font-weight: 600; line-height: 1; cursor: pointer;
+}
+.board-again:hover { border-color: var(--fg); }
+.board-again:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+
+/* ---- Narrow (phones): two lines per coin --------------------------------------------------------
+   1  AI  vs NVDA            −15%
+      AI in $ −14%  NVDA +2.1%  [bar]                                                               */
+@container board (max-width: 600px) {
+  .board-head, .board-row {
+    grid-template-columns: 1.6em minmax(0, 1fr) auto;
+    grid-template-areas: "rank coin own" ". small bar";
+    column-gap: 12px; row-gap: 8px;
+  }
+  .board-row { padding: 12px 10px; }
+  .board-rank { align-self: baseline; padding-top: 2px; }
+  .board-bar { width: 64px; justify-self: end; }
+  .board-small { gap: 2px 12px; font-size: 13px; }
+  .board-own { font-size: 22px; }
+}
+@container board (max-width: 330px) {
+  .board-bar { width: 44px; }
+  .board-vs { font-size: 12px; }
+}
+
+@media (max-width: 600px) {
+  .board-top { align-items: flex-start; }
+}
+@media (max-width: 340px) {
+  .board-tabs { width: 100%; justify-content: space-between; }
+  .board-tab { flex: 1 1 0; min-width: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-spin { animation: none; border-color: var(--fg); }
+  .board-skel { animation: none; }
+  .board-row { transition: none; }
+}

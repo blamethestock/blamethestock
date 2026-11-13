@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Board preview · Blame the Stock (dev)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<link rel="stylesheet" href="../../site/styles.css">
+<link rel="stylesheet" href="../../site/src/features/board.css">
+<style>
+  :root { --font: "Archivo", "Arial Narrow", Arial, sans-serif; }
+  body { font-family: var(--font); }
+  .bar {
+    position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+    padding: 12px 16px; background: rgba(0,0,0,.92); border-bottom: 1px solid #262626; font-size: 13px;
+  }
+  .bar h1 { margin: 0 12px 0 0; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+  .bar label { color: #8b8b8b; display: inline-flex; gap: 6px; align-items: center; }
+  .bar select, .bar button { font: inherit; color: #fff; background: #111; border: 1px solid #333; border-radius: 999px; padding: 6px 12px; }
+  .bar button { cursor: pointer; }
+  .bar output { color: #8b8b8b; }
+  .row { padding: 8px 16px 48px; border-bottom: 1px solid #1a1a1a; }
+  .row-head { padding: 24px 0 0; }
+  .row-head h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+  .row-head p { margin: 4px 0 0; color: #8b8b8b; font-size: 13px; }
+  .frames { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
+  .frame { flex: none; max-width: 100%; }
+  .frame-desk { width: 1080px; }
+  .frame-phone { width: 375px; outline: 1px dashed #222; }
+  .frame .section { padding-top: 32px; padding-bottom: 32px; }
+  .frame-phone .section { width: calc(100% - 32px); }
+  body[data-layout="desktop"] .frame-phone { display: none; }
+  body[data-layout="phone"] .frame-desk { display: none; }
+  #tapped { margin: 0; padding: 10px 16px; color: #8b8b8b; font-size: 13px; border-bottom: 1px solid #1a1a1a; }
+</style>
+</head>
+<body data-layout="both">
+  <div class="bar">
+    <h1>Board preview</h1>
+    <label>Layout
+      <select id="layout">
+        <option value="both">Desktop + phone</option>
+        <option value="desktop">Desktop only</option>
+        <option value="phone">Phone only</option>
+      </select>
+    </label>
+    <button type="button" id="live">Load the live board</button>
+    <output id="live-stats"></output>
+  </div>
+  <p id="tapped">Sample rows below use made-up moves (to show every bar shape). "Load the live board" reads Robinhood Chain.</p>
+  <main id="rows"></main>
+
+<script type="module">
+import { SETTINGS } from '../../site/settings.js';
+import { initBoard, boardRow, rankRows, visibleCoins, getBoard, clearBoardCache } from '../../site/src/features/board.js';
+import { BOARD_COINS } from '../../site/src/features/board-list.js';
+import { stats, resetStats } from '../../site/src/data/rpc.js';
+
+const rowsEl = document.getElementById('rows');
+const tapped = (address) => { document.getElementById('tapped').textContent = 'Tapped ' + address + ' (on the site this opens the full split).'; };
+
+function section() {
+  const s = document.createElement('section');
+  s.className = 'section board';
+  s.innerHTML = '<div class="section-head"><h2 class="section-label"><span>Stock-paired board</span></h2></div><div class="board-body"></div>';
+  return s;
+}
+
+function row(title, note, make) {
+  const wrap = document.createElement('div');
+  wrap.className = 'row';
+  wrap.innerHTML = '<div class="row-head"><h2></h2><p></p></div><div class="frames"></div>';
+  wrap.querySelector('h2').textContent = title;
+  wrap.querySelector('p').textContent = note;
+  const frames = wrap.querySelector('.frames');
+  const boards = [];
+  for (const kind of ['desk', 'phone']) {
+    const f = document.createElement('div');
+    f.className = 'frame frame-' + kind;
+    const s = section();
+    f.append(s);
+    frames.append(f);
+    boards.push(make(s));
+  }
+  rowsEl.append(wrap);
+  return boards;
+}
+
+// Made-up moves for twelve listed coins: coin in its stock, stock in dollars.
+const MOVES = [[0.42, 0.031], [0.18, -0.02], [0.065, 0.012], [0.0021, 0.004], [-0.003, 0.002], [-0.04, -0.05],
+  [-0.08, 0.06], [-0.12, -0.012], [-0.21, 0.004], [-0.33, -0.018], [0.11, -0.09], [-0.5, 0.02]];
+const coins = visibleCoins(BOARD_COINS, []).slice(0, MOVES.length).map((c) => ({ ...c, stock: c.stock }));
+const results = coins.map((c, i) => {
+  const [r, q] = MOVES[i];
+  return boardRow(c, { start: 1, end: 1 + r }, { start: 100, end: 100 * (1 + q) });
+});
+const sample = { ok: true, window: '24h', end: { block: 0, time: Date.now() / 1000 }, start: { block: 0, time: 0 },
+  rows: rankRows(results, 25), failed: 2, young: 1 };
+
+row('Board with rows', 'Ranked by own move. Two coins left out (read failed) and one too new: the notes say so.',
+  (s) => initBoard(s, { autoload: false, open: tapped })).forEach((b) => b.show({ kind: 'result', data: sample }));
+row('Loading', 'Spinner line while 40 coins are read.',
+  (s) => initBoard(s, { autoload: false, open: tapped }));
+row("Couldn't load", 'More than half failed (or the chain is delayed): no numbers at all.',
+  (s) => initBoard(s, { autoload: false, open: tapped })).forEach((b) => b.show({ kind: 'result', data: { ok: false, why: 'failed' } }));
+
+const live = row('Live', 'Real reads from Robinhood Chain (same code as the site). Window tabs work; tapping a row is logged above.',
+  (s) => initBoard(s, { autoload: false, open: tapped }));
+document.getElementById('live').addEventListener('click', async () => {
+  const out = document.getElementById('live-stats');
+  clearBoardCache();
+  resetStats();
+  out.textContent = 'Loading…';
+  const t0 = performance.now();
+  const res = await getBoard(SETTINGS.board.window || '24h', { fresh: true });
+  const secs = ((performance.now() - t0) / 1000).toFixed(1);
+  out.textContent = (res.ok ? res.good + ' coins, ' + res.failed + ' failed, ' + res.young + ' too new' : 'failed (' + res.why + ')')
+    + ' · ' + secs + ' s · ' + stats.requests + ' requests (' + stats.retries + ' retries)'
+    + (res.ok ? ' · blocks ' + res.start.block + ' → ' + res.end.block : '');
+  window.lastBoard = res;
+  live.forEach((b) => b.run(res.ok ? res.window : (SETTINGS.board.window || '24h')));   // drawn from the cache just filled
+});
+
+document.getElementById('layout').addEventListener('change', (e) => { document.body.dataset.layout = e.target.value; });
+</script>
+</body>
+</html>

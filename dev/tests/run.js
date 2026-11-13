@@ -12,6 +12,8 @@ import './stickers.test.js';    // STICKERS builder
 // import './page.test.js';     // PAGE builder
 import './integration.test.js'; // curves, stock note, lookalike, X-post wording
 import './markethours.test.js'; // off-hours mode calendar
+import './offhours.test.js';    // off-hours mode (switched off by default)
+import './board.test.js';       // Stock-Paired Board (switched off by default)
 // =================== END OF TEST FILES ================
 
 const inBrowser = typeof document !== 'undefined';   // note: browsers also have a print() (it prints the page)

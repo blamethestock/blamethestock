@@ -1,6 +1,6 @@
 // Stock-Paired Board: coins whose main pool is paired with an official Robinhood stock token.
 // Found by scanning Robinhood Chain on 2026-11-13 (05:00 UTC). Filter: at least $10k of the stock in the pool
-// and at least 50 trades in 24h. Refresh by asking for a new scan (dev/tools/ has the script once written).
+// and at least 50 trades in 24h. Refresh: /usr/bin/python3 -I dev/tools/refresh_board.py
 export const BOARD_SCANNED_AT = "2026-11-13T05:19:00Z";
 export const BOARD_COINS = [
   {"symbol": "AI", "address": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18", "pool": "0xcbdfea90430a30ee4469c9902e120a77e7c7e4711d5643671c1d1957f2f1ce27", "stock": "NVDA", "stockAddress": "0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec", "stockSideUsd": 616779},

@@ -311,6 +311,8 @@ export function renderResult(el, result, opts = {}) {
         h('dt', { text: n.label }),
         h('dd', null, h('span', { class: 'bts-arrow', 'aria-hidden': 'true', text: n.arrow || '' }), n.text)))));
   }
+  // Off-hours mode: an empty slot under the numbers, filled later by renderOffHours().
+  if (opts.offHours) body.append(h('section', { class: 'bts-off', hidden: true }));
   const notes = (result.notes || []).filter(Boolean);
   const warnings = (result.warnings || []).filter(Boolean);
   if (notes.length) body.append(h('ul', { class: 'bts-notes' }, notes.map((t) => h('li', { text: t }))));
@@ -337,6 +339,50 @@ export function renderResult(el, result, opts = {}) {
     setTimeout(() => { if (card.isConnected) prepareShareImage(result, settings); }, COUNT_MS + BAR_MS);
   }
   return card;
+}
+
+// ---- Public: off-hours block (settings.features.offHoursMode) -----------------------------------
+// renderOffHours(el, view): fills the slot that renderResult(..., { offHours: true }) left under the numbers.
+//   { state: 'loading', title, text }   'Checking market hours…'
+//   { ok: true, title, sentence, line, segments, legend, aria, startText, endText }   (features/offhours.js)
+//   { ok: false, text }                 one grey line; no text = the block stays hidden
+// Touches nothing else on the card. Returns the slot, or null when this card has none.
+export function renderOffHours(el, view) {
+  const card = el && el.classList && el.classList.contains('bts-card') ? el : el ? currentCard(el) : null;
+  const slot = card && card.dataset.state === 'result' ? card.querySelector('.bts-off') : null;
+  if (!slot) return null;
+  const v = view || {};
+  const title = () => h('p', { class: 'bts-off-title', text: v.title || 'Off-hours' });
+  slot.removeAttribute('aria-busy');
+  slot.classList.remove('is-in');
+  if (v.state === 'loading') {
+    slot.dataset.state = 'loading';
+    slot.setAttribute('aria-busy', 'true');
+    slot.replaceChildren(title(), h('p', { class: 'bts-off-progress', text: v.text || '' }));
+  } else if (!v.ok) {
+    slot.dataset.state = 'error';
+    slot.replaceChildren(...(v.text ? [h('p', { class: 'bts-off-note', text: v.text })] : []));
+    if (!v.text) { slot.hidden = true; return slot; }
+  } else {
+    slot.dataset.state = 'ready';
+    const segs = (v.segments || []).map((s) => h('span', {
+      class: 'bts-off-seg ' + (s.open ? 'is-open' : 'is-closed'),
+      style: `flex-grow:${Math.max(0, Number(s.share) || 0)}`,
+    }));
+    slot.replaceChildren(...[
+      title(),
+      h('p', { class: 'bts-off-sentence', text: v.sentence || '' }),
+      v.line ? h('p', { class: 'bts-off-line', text: v.line }) : null,
+      h('div', { class: 'bts-off-bar', role: 'img', 'aria-label': v.aria || '' }, segs),
+      h('div', { class: 'bts-off-ends', 'aria-hidden': 'true' }, h('span', { text: v.startText || '' }), h('span', { text: v.endText || '' })),
+      h('ul', { class: 'bts-off-legend' }, (v.legend || []).map((k) => h('li', null,
+        h('i', { class: 'bts-off-dot ' + (k.open ? 'is-open' : 'is-closed'), 'aria-hidden': 'true' }),
+        h('span', { text: k.label || '' }), ' ', h('b', { text: k.time || '' })))),
+    ].filter(Boolean));   // replaceChildren() would write a null out as the word "null"
+    if (!reducedMotion()) slot.classList.add('is-in');
+  }
+  slot.hidden = false;
+  return slot;
 }
 
 // ---- Public: loading --------------------------------------------------------------------------

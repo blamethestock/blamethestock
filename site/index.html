@@ -38,6 +38,7 @@
 
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="src/ui/card.css">
+  <!-- The Stock-Paired Board's stylesheet (src/features/board.css) is added by src/ui/page.js only when the board is on. -->
 
   <script>
     // Tiny early switch: lets the page hide things that animate in, before they flash.
@@ -160,6 +161,15 @@
           </ol>
         </div>
       </div>
+    </section>
+
+    <!-- 4b. Stock-Paired Board: stays hidden unless settings.js has features.stockBoard: true
+         (filled by src/features/board.js, which only loads when the switch is on) -->
+    <section class="section board" id="board" aria-labelledby="board-title" hidden>
+      <div class="section-head" data-reveal>
+        <h2 class="section-label" id="board-title"><span>Stock-paired board</span></h2>
+      </div>
+      <div class="board-body" data-reveal></div>
     </section>
 
     <!-- 5. One giant sliding line -->

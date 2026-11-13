@@ -46,6 +46,22 @@ export const SETTINGS = {
     stockBoard: false,      // Monday: the Stock-Paired Board
   },
 
+  // ---- Stock-Paired Board (shows when stockBoard above is true) ------
+  board: {
+    window: "24h",          // the time window it opens on: "1h", "6h", "24h" or "7d"
+    maxRows: 25,            // show at most this many coins
+    hide: [],               // coins to leave off, by ticker in quotes, for example ["MEME", "GAS"]
+    wording: {
+      title: "Stock-paired board",
+      intro: "Coins paired with a stock token, ranked by their own move: what's left after taking out the stock's move.",
+      tapHint: "Pick a coin to see its full split.",
+      loading: "Reading {count} coins from Robinhood Chain…",
+      failed: "Couldn't load the board right now.",
+      ownMove: "Own move",
+      listNote: "List of coins checked on {date}. Coins whose main pool is paired with a Robinhood stock token.",
+    },
+  },
+
   // ---- Example coins under the paste box (tap to try) ----------------
   examples: [
     { label: "AI",    address: "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18" },  // paired with NVDA
@@ -131,6 +147,27 @@ export const SETTINGS = {
       "stale": "Robinhood Chain data looks delayed right now, so we're not showing numbers. Try again in a minute.",
       "rpc-failed": "We couldn't reach Robinhood Chain just now. Try again in a minute.",
       "pair-too-new": "What this coin is paired with is too new to measure over this window. Try a shorter one.",
+    },
+    // Off-hours mode (switch: features.offHoursMode). A small block under the three numbers.
+    // "US stock market" = the regular session, 9:30 AM to 4:00 PM New York time on trading days.
+    offHours: {
+      title: "Off-hours",
+      checking: "Checking market hours…",
+      unavailable: "We couldn't check market hours right now.",
+      allClosed: "The US stock market was closed for this whole window.",
+      allOpen: "The US stock market was open for this whole window.",
+      almostAllClosed: "Almost all of this move happened while the US stock market was closed.",
+      mostlyClosed: "Most of this move happened while the US stock market was closed.",
+      even: "This move was split about evenly between market hours and closed hours.",
+      mostlyOpen: "Most of this move happened while the US stock market was open.",
+      almostAllOpen: "Almost all of this move happened while the US stock market was open.",
+      opposite: "{coin} {closedWay} while the US stock market was closed and {openWay} while it was open.",
+      flat: "{coin} barely moved, whether the US stock market was open or closed.",
+      numbers: "While closed: {closed}. While open: {open}.",
+      side: "{coin} {coinPct}",                    // for coins paired with ETH, a dollar coin or another coin
+      sideStock: "{coin} {coinPct}, {pair} {pairPct}",   // for coins paired with a stock
+      closedLabel: "Market closed",
+      openLabel: "Market open",
     },
   },
 };

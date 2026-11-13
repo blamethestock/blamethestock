@@ -1,10 +1,10 @@
 // Blame the Stock: the tool. Reads ?ca and ?w, wires the paste box, the example coins and the window tabs,
 // asks the data layer for prices, turns them into words (core) and shows the card (ui/card.js).
 import { SETTINGS } from '../settings.js';
-import { fetchPriceInput, clearDataCache } from './data/index.js';
+import { fetchPriceInput, clearDataCache, fetchOffHours } from './data/index.js';
 import { buildResult, buildError } from './core/verdict.js';
 import { validateAddress, parseWindow } from './core/math.js';
-import { renderLoading, renderResult, renderError, focusInput } from './ui/card.js';
+import { renderLoading, renderResult, renderError, focusInput, renderOffHours } from './ui/card.js';
 
 const FIRST_STEP = 'Finding the pool…';
 
@@ -85,7 +85,9 @@ async function lookup(raw, win, { scroll = true } = {}) {
   }
 
   if (result && result.ok) {
-    renderResult(out, result, { onWindow: again, settings: SETTINGS });
+    const off = offHoursOn();
+    renderResult(out, result, { onWindow: again, settings: SETTINGS, offHours: off });
+    if (off) showOffHours(out, res, result, my).catch(() => { /* the card itself is already drawn */ });
   } else {
     renderError(out, result && result.message ? result : toError(result), {
       // "Try again" means a fresh look: drop cached answers (a failed pool search stays cached otherwise).
@@ -101,6 +103,34 @@ async function lookup(raw, win, { scroll = true } = {}) {
     });
   }
   if (scroll) reveal(out);
+}
+
+// ---- Off-hours mode (settings.features.offHoursMode) -------------------------------------------
+// On the owner's own computer only (localhost), ?dev-offhours=1 turns it on for testing.
+function offHoursOn() {
+  if (SETTINGS.features && SETTINGS.features.offHoursMode === true) return true;
+  try {
+    const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    return local && new URLSearchParams(location.search).get('dev-offhours') === '1';
+  } catch (e) { return false; }
+}
+
+// Runs after the card is drawn and never holds it up: a small block under the numbers, or one grey line.
+async function showOffHours(out, priceInput, result, my) {
+  const W = (SETTINGS.wording && SETTINGS.wording.offHours) || {};
+  const live = () => my === seq;
+  renderOffHours(out, { state: 'loading', title: W.title, text: W.checking });
+  let view = null;
+  try {
+    const [off, mod] = await Promise.all([
+      fetchOffHours(priceInput, { cancelled: () => !live() }),
+      import('./features/offhours.js'),
+    ]);
+    if (!live()) return;
+    view = mod.offHoursView(off, result, SETTINGS);
+  } catch (e) { view = null; }
+  if (!live()) return;
+  renderOffHours(out, view && view.ok ? view : { ok: false, text: W.unavailable });
 }
 
 function submitFromInput({ blur = true } = {}) {

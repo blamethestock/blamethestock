@@ -2,13 +2,13 @@
 // Every price comes from Robinhood Chain at stated blocks. DexScreener/GeckoTerminal only find the pools.
 import { SETTINGS } from '../../settings.js';
 import * as K from './constants.js';
-import { stats, resetStats } from './rpc.js';
+import { stats, resetStats, rpcBatch } from './rpc.js';
 import {
   headBlock, blockTime, blockAtTime, readSqrtMany, findInitialize, sqrtFromLogs, tokenFacts, getCode,
-  priceOf, sortTokens, clearChainCaches,
+  priceOf, sortTokens, clearChainCaches, findBlockAtTime, blockTimes, ethCall, wordAt, slot0Call, parseSwapLog, toHex,
 } from './chain.js';
 import { classifyAddress, findPools, pickUsdPool, otherChainPairCount } from './discover.js';
-import { detectCurve, readCurve, findCurveStart, curvePrice, symbolOf, clearCurveCache } from './curve.js';
+import { detectCurve, readCurve, findCurveStart, curvePrice, symbolOf, clearCurveCache, SEL_GET_RESERVES } from './curve.js';
 
 class DataError extends Error {
   constructor(code, extra = {}) { super(code); this.code = code; this.extra = extra; }
@@ -22,6 +22,9 @@ export function clearDataCache() {
   cache.end = null;
   clearChainCaches();
   clearCurveCache();
+  routes.clear();
+  atTime.clear();
+  offReads.clear();
 }
 
 // Request counters for the test page: { requests, retries, byHost, byMethod }.
@@ -184,7 +187,7 @@ async function curveLookup({ coin, curve, win, secs, endP, startP, stocks, pinne
   const realQuote = eCurve.real != null ? Number(eCurve.real) / 10 ** decQuote : null;
   const pairSideUsd = realQuote != null ? realQuote * (pairUsd ? pairUsd.end : 1) : null;
   const sym = curve.symbol || '';
-  return {
+  return remember({
     ok: true,
     coin: { address: coin, symbol: sym, name: sym },
     pair: { address: pair.address, symbol: pair.symbol, kind: pair.kind, lookalike: lookalike(pair, stocks) },
@@ -203,7 +206,7 @@ async function curveLookup({ coin, curve, win, secs, endP, startP, stocks, pinne
     pairUsd,
     pairVia: route.via,
     tradedInWindow: sCurve.quote !== eCurve.quote || sCurve.token !== eCurve.token,
-  };
+  }, { type: 'curve', curve: curve.curve, decCoin, decQuote, routeLegs: route.legs });
 }
 
 // Why there is no pool: another chain, not a token, or just no pool.
@@ -338,7 +341,7 @@ async function lookup(address, window, opts) {
   const pairSideUsd = cand.pairAmount != null ? cand.pairAmount * (pairUsd ? pairUsd.end : 1) : null;
   const coinSymbol = cand.coin.symbol || '';
 
-  return {
+  return remember({
     ok: true,
     coin: { address: coin, symbol: coinSymbol, name: cand.coin.name || coinSymbol },
     pair: { address: pair.address, symbol: pair.symbol, kind: pair.kind, lookalike: lookalike(pair, stocks) },
@@ -357,5 +360,189 @@ async function lookup(address, window, opts) {
     pairUsd,
     pairVia: route.via,
     tradedInWindow: s[0] !== e[0],
+  }, { type: 'pool', coin, coinLeg, routeLegs });
+}
+
+// ---- Off-hours mode (settings.features.offHoursMode) -------------------------------------------
+// fetchOffHours(priceInput, { cancelled }) -> { ok: true, pieces, totals, start, end } | { ok: false, code }
+//   pieces: [{ from, to, open, fromBlock, toBlock, c, q, r }] — one per stretch of US market time (open or closed),
+//   totals: features/offhours.js summarize(pieces) (closed and open stretches multiplied together).
+// Splits the window at every US market open and close (features/markethours.js), finds the block at each one (the
+// last block at or before that second, the same rule as the window's start) and reads the SAME pools (or Pons
+// curve) as the lookup that produced priceInput, at those blocks. The start and end prices are the card's own, so
+// the stretches multiply back to the card's c and q exactly. Any failure -> { ok: false }: never part of the numbers.
+const routes = new Map();      // 'coin|window|end block' -> the legs that lookup read (the last few lookups)
+const atTime = new Map();      // a market open/close (unix s) -> promise of its block (a fixed fact once found)
+const routeKey = (pi) => pi.coin.address + '|' + pi.window + '|' + pi.end.block;
+
+function remember(pi, route) {
+  routes.set(routeKey(pi), route);
+  while (routes.size > 12) routes.delete(routes.keys().next().value);
+  return pi;
+}
+
+export async function fetchOffHours(priceInput, opts = {}) {
+  try {
+    return await offHours(priceInput, opts);
+  } catch (e) {
+    return { ok: false, code: 'rpc-failed', detail: String((e && e.message) || e) };
+  }
+}
+
+async function offHours(pi, opts) {
+  const no = (code) => ({ ok: false, code });
+  if (!pi || pi.ok !== true || !pi.coin || !pi.start || !pi.end || !pi.coinInPair) return no('no-input');
+  const route = routes.get(routeKey(pi));
+  if (!route) return no('no-route');
+  const cancelled = () => typeof opts.cancelled === 'function' && !!opts.cancelled();
+  const [{ splitWindow }, { piecesFromPrices, summarize }] = await Promise.all([
+    import('../features/markethours.js'), import('../features/offhours.js'),
+  ]);
+  const split = splitWindow(pi.start.time, pi.end.time);
+  if (!split.pieces.length) return no('empty-window');
+
+  // Blocks at the opens and closes. First guess from this window's own average block time.
+  const ref = { number: pi.end.block, time: pi.end.time };
+  const spb = (pi.end.time - pi.start.time) / (pi.end.block - pi.start.block);
+  const getTimes = sharedTimes();
+  const mids = await Promise.all(split.boundaries.map((T) => blockAt(T, ref, spb > 0 && spb < 10 ? spb : K.BLOCK_SECONDS, getTimes)));
+  const blocks = [pi.start.block, ...mids, pi.end.block];
+  for (let i = 1; i < blocks.length; i++) if (!(blocks[i] >= blocks[i - 1])) return no('block-order');
+  if (cancelled()) return no('cancelled');
+
+  const prices = mids.length ? await pricesAt(route, mids) : [];
+  if (cancelled()) return no('cancelled');
+  const ends = (k) => ({ coinInPair: pi.coinInPair[k], pairUsd: pi.pairUsd ? pi.pairUsd[k] : null });
+  const pieces = piecesFromPrices(split, [ends('start'), ...prices, ends('end')]);
+  if (!pieces) return no('bad-prices');
+  pieces.forEach((p, i) => { p.fromBlock = blocks[i]; p.toBlock = blocks[i + 1]; });
+  return { ok: true, coin: pi.coin.address, window: pi.window, start: pi.start, end: pi.end, pieces, totals: summarize(pieces) };
+}
+
+function blockAt(T, ref, secondsPerBlock, getTimes) {
+  if (!(T < ref.time)) return Promise.resolve(ref.number);
+  let p = atTime.get(T);
+  if (!p) {
+    p = findBlockAtTime(T, ref, getTimes, secondsPerBlock);
+    atTime.set(T, p);
+    p.catch(() => { if (atTime.get(T) === p) atTime.delete(T); });
+  }
+  return p;
+}
+
+// Block searches running side by side share their header requests: each round's probes go out as one batch
+// (blockTimes splits it into the official node's batch size), instead of one small request per search.
+function sharedTimes() {
+  let queue = null;
+  return (ns) => new Promise((resolve, reject) => {
+    if (!queue) {
+      const q = queue = [];
+      Promise.resolve().then(() => {               // every search asks in the same turn: send them together
+        queue = null;
+        const all = [...new Set(q.flatMap((x) => x.ns))];
+        blockTimes(all).then((ts) => {
+          const at = new Map(all.map((n, i) => [n, ts[i]]));
+          for (const x of q) x.resolve(x.ns.map((n) => at.get(n)));
+        }, (e) => { for (const x of q) x.reject(e); });
+      });
+    }
+    queue.push({ ns, resolve, reject });
+  });
+}
+
+// [{ coinInPair, pairUsd }] at each block, from the remembered legs (archive node; pools fall back to swap logs).
+async function pricesAt(route, blocks) {
+  const legs = route.type === 'pool' ? [route.coinLeg, ...route.routeLegs] : route.routeLegs;
+  const n = legs.length;
+  const [sqrts, curves] = await Promise.all([
+    n ? sqrtsAt(blocks.flatMap((block) => legs.map((pool) => ({ pool, block })))) : [],
+    route.type === 'curve' ? curvesAt(route.curve, blocks) : null,
+  ]);
+  return blocks.map((block, i) => {
+    const s = sqrts.slice(i * n, (i + 1) * n);
+    const coinInPair = route.type === 'pool' ? priceOf(route.coin, route.coinLeg, s[0]) : curvePrice(curves[i], route.decCoin, route.decQuote);
+    const pairS = route.type === 'pool' ? s.slice(1) : s;
+    return { coinInPair, pairUsd: route.routeLegs.length ? routePrice(route.routeLegs, pairS) : null };
+  });
+}
+
+// Pool prices (sqrtPriceX96) at the opens and closes. The archive node first, but only after one small batch shows
+// it is answering: when it says "unknown state" it keeps saying it for minutes, and asking again for every point
+// would only burn requests. Otherwise (or for what it can't answer) the last trade at or before each point, from
+// the official node's trade log: every point in one batch, nearest stretch of blocks first.
+const offReads = new Map();    // 'pool@block' -> sqrtPriceX96 at an open/close (a fixed fact once read)
+const LOG_TIERS = [[0, 2000], [2000, 20000], [20000, 200000]];   // blocks back from the point: ~3 min, ~35 min, ~6 h
+
+async function sqrtsAt(items) {
+  const keyOf = (it) => it.pool.id + '@' + it.block;
+  const out = items.map((it) => offReads.get(keyOf(it)));
+  let todo = items.map((_, i) => i).filter((i) => out[i] === undefined);
+  const archive = async (idx) => {
+    let res;
+    try {
+      res = await rpcBatch('drpc', idx.map((i) => {
+        const c = slot0Call(items[i].pool);
+        return ethCall(c.to, c.data, items[i].block);
+      }), { tries: 4 });
+    } catch (e) { return false; }
+    let all = true;
+    idx.forEach((i, j) => {
+      const s = res[j] && res[j].result !== undefined ? wordAt(res[j].result, 0) : 0n;
+      if (s !== 0n) out[i] = s; else all = false;      // 0n: "no pool" (it can say so wrongly): ask the trade log
+    });
+    return all;
   };
+  const n = K.RPC.drpc.batchMax;
+  if (todo.length && (await archive(todo.slice(0, n))) && todo.length > n) await archive(todo.slice(n));
+  todo = todo.filter((i) => out[i] === undefined && items[i].pool.uniswap);
+  if (todo.length) await fromTradeLogs(items, todo, out);
+  return items.map((it, i) => {
+    if (out[i] === undefined || out[i] === 0n) fail('rpc-failed', { detail: 'no price at an open/close' });
+    offReads.set(keyOf(it), out[i]);
+    return out[i];
+  });
+}
+
+async function fromTradeLogs(items, idx, out) {
+  const left = [];
+  for (const [near, far] of LOG_TIERS) {
+    if (!idx.length) break;
+    let res;
+    try {
+      res = await rpcBatch('official', idx.map((i) => {
+        const { pool, block } = items[i];
+        const f = pool.version === 'v4'
+          ? { address: K.POOL_MANAGER, topics: [K.TOPIC_V4_SWAP, pool.id] }
+          : { address: pool.id, topics: [K.TOPIC_V3_SWAP] };
+        return { method: 'eth_getLogs', params: [{ ...f, fromBlock: toHex(Math.max(0, block - far + 1)), toBlock: toHex(Math.max(0, block - near)) }] };
+      }), { tries: 3 });
+    } catch (e) { break; }
+    const next = [];
+    idx.forEach((i, j) => {
+      const logs = res[j] && Array.isArray(res[j].result) ? res[j].result : null;
+      if (!logs) { left.push(i); return; }                          // an error (too many logs, node trouble)
+      if (!logs.length) { next.push(i); return; }                   // no trade that recent: look further back
+      const last = logs.map(parseSwapLog).reduce((a, b) => (b.block > a.block || (b.block === a.block && b.index > a.index) ? b : a));
+      if (last.sqrt !== 0n) out[i] = last.sqrt; else left.push(i);
+    });
+    idx = next;
+  }
+  // Whatever is left (a very quiet pool, an error above): the one-by-one search, back to the pool's first price.
+  for (const i of left.concat(idx)) out[i] = await sqrtFromLogs(items[i].pool, items[i].block);
+}
+
+// Curve reserves at the opens and closes (archive node only, as for the window's start). One small batch first,
+// so a node that isn't answering is asked once, not once per point.
+async function curvesAt(curve, blocks) {
+  const read = async (bs) => {
+    if (!bs.length) return [];
+    const res = await rpcBatch('drpc', bs.map((b) => ethCall(curve, SEL_GET_RESERVES, b)), { tries: 4 });
+    return res.map((r) => {
+      if (!r || !r.result || r.result.length < 130) fail('rpc-failed', { detail: 'curve unreadable at an open/close' });
+      return { quote: wordAt(r.result, 0), token: wordAt(r.result, 1), real: null };
+    });
+  };
+  const n = K.RPC.drpc.batchMax;
+  const first = await read(blocks.slice(0, n));
+  return first.concat(await read(blocks.slice(n)));
 }

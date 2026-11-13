@@ -292,6 +292,38 @@ function wirePasteButtons() {
   });
 }
 
+// ---- 4b. Stock-Paired Board: its code loads only when the switch in settings.js is on ----
+// (On localhost only, ?dev-board=1 shows it with the switch off, for checking before launch.)
+function startBoard() {
+  const section = byId('board');
+  if (!section) return;
+  let on = !!(S.features && S.features.stockBoard === true);
+  try {
+    if (!on && /^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+      on = new URLSearchParams(location.search).get('dev-board') === '1';
+    }
+  } catch (e) { /* no flag */ }
+  if (!on) return;
+  section.hidden = false;                 // shown now so the page below it doesn't jump later
+  // Its stylesheet too is fetched only when the board is on (nothing extra loads while the switch is off).
+  const css = h('link', { rel: 'stylesheet', href: new URL('../features/board.css', import.meta.url).href });
+  const cssReady = new Promise((resolve) => {
+    css.addEventListener('load', resolve, { once: true });
+    css.addEventListener('error', resolve, { once: true });
+  });
+  document.head.append(css);
+  // The board's code (and its coin list) loads once the page has settled; its prices load near the section.
+  const later = window.requestIdleCallback || ((fn) => setTimeout(fn, 300));
+  later(() => {
+    Promise.all([import('../features/board.js'), cssReady])
+      .then(([m]) => m.initBoard(section))
+      .catch((e) => {
+        section.hidden = true;
+        console.error('[board]', e);
+      });
+  }, { timeout: 2000 });
+}
+
 function safely(step) {
   try {
     step();
@@ -303,7 +335,7 @@ function safely(step) {
 function boot() {
   let font = { ready: Promise.resolve() };
   safely(() => { font = loadFont(); });
-  [fillMenu, fillHero, fillMarquee, fillToken, fillUpdates, fillFooter, wirePasteButtons].forEach(safely);
+  [fillMenu, fillHero, fillMarquee, fillToken, fillUpdates, fillFooter, wirePasteButtons, startBoard].forEach(safely);
   safely(() => initMotion({ ratio: S.headline && S.headline.widthOfScreen, fontReady: font.ready }));
   document.documentElement.classList.add('page-ok');
 
