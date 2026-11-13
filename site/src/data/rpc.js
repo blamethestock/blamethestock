@@ -102,7 +102,8 @@ async function request(url, init, timeoutMs) {
 // ---- JSON-RPC ------------------------------------------------------------------------------
 // calls: [{ method, params }]. Returns one entry per call: { result } or { error: RpcError }.
 // Transport failures (after retries) throw an RpcError.
-export async function rpcBatch(endpointName, calls, { tries = 4, timeoutMs = 10000 } = {}) {
+export async function rpcBatch(endpointName, calls, { tries = 4, timeoutMs = endpointName === 'official' ? 5000 : 10000 } = {}) {
+  // The official node answers fast or not at all, so give up on it sooner and fall over to the others.
   const ep = RPC[endpointName];
   if (!ep) throw new Error('unknown endpoint ' + endpointName);
   const out = new Array(calls.length);

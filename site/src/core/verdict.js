@@ -79,6 +79,7 @@ export function buildResult(pi, settings = SETTINGS, opts = {}) {
     share: sharePct === null ? null : sharePct + '%',
     pair: pairName, Pair: PairName, pairShort,
     pairPct: pct(q), pairPctAbs: pctAbs(q),
+    pairMoved: moveWords(q) === 'flat' ? 'barely moved' : (q < 0 ? 'fell ' : 'rose ') + pctAbs(q),
     ownMove: moveWords(r),
     coin: coinSym, coinTag: coinSym.charAt(0) === '$' ? coinSym : '$' + coinSym,
     window: windowLabel,
@@ -100,20 +101,29 @@ export function buildResult(pi, settings = SETTINGS, opts = {}) {
     'pair-bigger': q < 0 ? w.pairBiggerDown : w.pairBiggerUp,
   }[caseName];
   const blame = fill(blameTemplate, vars);
-  vars.blame = blame;
+  // The X post speaks as the visitor ("mine held up better"), when settings has that wording.
+  const shareBlameTemplate = caseName === 'pair-bigger' ? (q < 0 ? w.sharePairBiggerDown : w.sharePairBiggerUp) : null;
+  vars.blame = shareBlameTemplate ? fill(shareBlameTemplate, vars) : blame;
   const showOwnMove = caseName === 'pair-bigger' || caseName === 'opposite' || (caseName === 'flat' && pairMovedWhileFlat);
   const subline = showOwnMove ? fill(w.ownMove, vars) : '';
 
+  const onCurve = pool.source === 'pons-curve';      // a Pons coin still on its launch curve (no pool yet)
   const notes = [];
-  if (pi.sinceLaunch) notes.push(fill(notesW.sinceLaunch, { ...vars, window }));   // "not the full 24h"
+  const sinceLaunchW = onCurve && notesW.sinceLaunchCurve ? notesW.sinceLaunchCurve : notesW.sinceLaunch;
+  if (pi.sinceLaunch) notes.push(fill(sinceLaunchW, { ...vars, window }));   // "not the full 24h"
   // No trades = the price is old, so say so for every pair kind (a dollar pair too: its 0.0% is a stale price).
   if (pi.tradedInWindow === false) notes.push(fill(notesW.noTrades, vars));
-  notes.push(fill(notesW.pool, vars));
+  // Brief, logic 7: a stock token's price is its on-chain price, not the share price.
+  if (kind === 'stock' && notesW.stockToken) notes.push(fill(notesW.stockToken, vars));
+  notes.push(fill(onCurve && notesW.curve ? notesW.curve : notesW.pool, vars));
 
   const warnings = [];
+  // A plain coin that copies a stock/ETH/dollar ticker (e.g. a fake "NVDA") is flagged by the data layer.
+  if (pairIn.lookalike && notesW.lookalike) warnings.push(fill(notesW.lookalike, vars));
   if (liquidity === null || liquidity < lowLiq) {
     // No dollar figure for the pool: settings may add notes.lowLiquidityUnknown; until then reuse lowLiquidity.
-    warnings.push(liquidity !== null ? fill(notesW.lowLiquidity, vars)
+    const lowW = onCurve && notesW.lowLiquidityCurve ? notesW.lowLiquidityCurve : notesW.lowLiquidity;
+    warnings.push(liquidity !== null ? fill(lowW, vars)
       : notesW.lowLiquidityUnknown ? fill(notesW.lowLiquidityUnknown, vars)
       : fill(notesW.lowLiquidity, { ...vars, liquidity: 'an unknown amount' }));
   }

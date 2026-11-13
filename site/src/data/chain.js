@@ -146,7 +146,7 @@ export const blockAtTime = (T, ref) => findBlockAtTime(T, ref, blockTimes);
 // ---- tokens ---------------------------------------------------------------------------------------
 // One batch of 'latest' calls: the official RPC first, then dRPC, so a down or rate-limited official
 // node doesn't stop every lookup. Throws when an item still has a retryable error on both.
-async function batchLatest(calls) {
+export async function batchLatest(calls) {
   let last = null;
   for (const [ep, tries] of [['official', 2], ['drpc', 3]]) {
     try {
@@ -202,7 +202,7 @@ export async function getCode(address) {
   return rpcAny(['official', 'publicnode', 'drpc'], 'eth_getCode', [address, 'latest']);
 }
 
-function ethCall(to, data, block = 'latest') {
+export function ethCall(to, data, block = 'latest') {
   return { method: 'eth_call', params: [{ to, data }, typeof block === 'number' ? toHex(block) : block] };
 }
 

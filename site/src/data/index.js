@@ -8,6 +8,7 @@ import {
   priceOf, sortTokens, clearChainCaches,
 } from './chain.js';
 import { classifyAddress, findPools, pickUsdPool, otherChainPairCount } from './discover.js';
+import { detectCurve, readCurve, findCurveStart, curvePrice, symbolOf, clearCurveCache } from './curve.js';
 
 class DataError extends Error {
   constructor(code, extra = {}) { super(code); this.code = code; this.extra = extra; }
@@ -20,6 +21,7 @@ export function clearDataCache() {
   cache.pools.clear();
   cache.end = null;
   clearChainCaches();
+  clearCurveCache();
 }
 
 // Request counters for the test page: { requests, retries, byHost, byMethod }.
@@ -58,7 +60,9 @@ function poolsFor(token, stocks) {
   if (hit && Date.now() - hit.at < K.POOL_CACHE_SECONDS * 1000) return hit.p;
   const p = findPools(token, stocks);
   cache.pools.set(token, { at: Date.now(), p });
-  p.catch(() => cache.pools.delete(token));
+  // A search that failed (neither source answered) must not stick for 5 minutes: drop it so the next try asks again.
+  const drop = () => { if (cache.pools.get(token) && cache.pools.get(token).p === p) cache.pools.delete(token); };
+  p.then((r) => { if (!r || !r.available) drop(); }, drop);
   return p;
 }
 
@@ -122,6 +126,86 @@ function lookalike(pair, stocks) {
 
 const routePrice = (legs, sqrts) => legs.reduce((p, leg, i) => p * priceOf(leg.base, leg, sqrts[i]), 1);
 
+// A Pons coin still on its launch curve: coin price in the curve's pair token from the curve's reserves,
+// the pair's dollar price from the usual pools, both at the same start and end blocks.
+async function curveLookup({ coin, curve, win, secs, endP, startP, stocks, pinned, progress }) {
+  progress('Reading the Pons launch curve…');
+  const pc = classifyAddress(curve.pairToken, stocks);
+  const pair = { address: curve.pairToken, kind: pc.kind, symbol: pc.symbol };
+  if (pair.kind === 'coin') pair.symbol = (await symbolOf(pair.address).catch(() => '')) || pair.address.slice(0, 6) + '…';
+  let route = await usdRoute(pair, stocks);
+  const isNative = pair.address === K.ETH_NATIVE;
+  const tokens = [...new Set([coin, ...(isNative ? [] : [pair.address]), ...route.legs.flatMap((l) => [l.token0, l.token1])])];
+  const facts = await tokenFacts(tokens, { checkStock: pair.kind === 'coin' ? [pair.address] : [] });
+  if (pair.kind === 'coin' && facts.get(pair.address).isStock) {        // a stock listed after stocks.js was built
+    pair.kind = 'stock';
+    route = await usdRoute(pair, stocks);
+    const more = route.legs.flatMap((l) => [l.token0, l.token1]).filter((t) => !facts.has(t));
+    if (more.length) for (const [t, f] of await tokenFacts(more)) facts.set(t, f);
+  }
+  for (const leg of route.legs) {
+    leg.dec0 = facts.get(leg.token0).decimals;
+    leg.dec1 = facts.get(leg.token1).decimals;
+    if (leg.dec0 == null || leg.dec1 == null) fail('unsupported-pool', { detail: 'unknown decimals' });
+  }
+  const decCoin = facts.get(coin).decimals;
+  const decQuote = isNative ? 18 : facts.get(pair.address).decimals;
+  if (decCoin == null || decQuote == null) fail('unsupported-pool', { detail: 'unknown decimals' });
+
+  const end = await endP;
+  if (!pinned && Date.now() / 1000 - end.time > SETTINGS.limits.staleSeconds) fail('stale');
+  progress('Reading prices…');
+  const [eCurve, eLegs] = await Promise.all([
+    readCurve(curve.curve, end.block, { archive: pinned, withReal: true }),
+    readSqrtMany(route.legs.map((pool) => ({ pool, block: end.block })), { archive: pinned }),
+  ]);
+  if (!eCurve) fail('rpc-failed', { detail: 'curve unreadable at end' });
+  if (eLegs.some((x) => x === 0n)) fail('unsupported-pool', { detail: 'pair price pool unreadable' });
+
+  let startBlock = await startP;
+  let sinceLaunch = false;
+  let sCurve = await readCurve(curve.curve, startBlock, { archive: true });
+  if (!sCurve) {                                                // the curve is younger than the window
+    const born = await findCurveStart(curve.curve, end.block);
+    if (!born) fail('rpc-failed', { detail: 'curve start not found' });
+    if (born > startBlock) { startBlock = born; sinceLaunch = true; }
+    sCurve = await readCurve(curve.curve, startBlock, { archive: true });
+    if (!sCurve) fail('rpc-failed', { detail: 'curve unreadable at start' });
+  }
+  const sLegs = await readSqrtMany(route.legs.map((pool) => ({ pool, block: startBlock })), { archive: true });
+  if (sLegs.some((x) => x === 0n)) fail('pair-too-new');
+  const startTime = await blockTime(startBlock);
+
+  const coinInPair = { start: curvePrice(sCurve, decCoin, decQuote), end: curvePrice(eCurve, decCoin, decQuote) };
+  const pairUsd = route.legs.length ? { start: routePrice(route.legs, sLegs), end: routePrice(route.legs, eLegs) } : null;
+  for (const v of [coinInPair.start, coinInPair.end, ...(pairUsd ? [pairUsd.start, pairUsd.end] : [])]) {
+    if (!(v > 0 && Number.isFinite(v))) fail('unsupported-pool', { detail: 'price out of range' });
+  }
+  const realQuote = eCurve.real != null ? Number(eCurve.real) / 10 ** decQuote : null;
+  const pairSideUsd = realQuote != null ? realQuote * (pairUsd ? pairUsd.end : 1) : null;
+  const sym = curve.symbol || '';
+  return {
+    ok: true,
+    coin: { address: coin, symbol: sym, name: sym },
+    pair: { address: pair.address, symbol: pair.symbol, kind: pair.kind, lookalike: lookalike(pair, stocks) },
+    pool: {
+      id: curve.curve, dex: 'pons-curve', label: sym + '/' + pair.symbol,
+      pairSideUsd: Number.isFinite(pairSideUsd) ? pairSideUsd : null,
+      createdAt: sinceLaunch ? startTime : null,
+      source: 'pons-curve',
+    },
+    window: win,
+    windowSeconds: secs,
+    start: { block: startBlock, time: startTime },
+    end: { block: end.block, time: end.time },
+    sinceLaunch,
+    coinInPair,
+    pairUsd,
+    pairVia: route.via,
+    tradedInWindow: sCurve.quote !== eCurve.quote || sCurve.token !== eCurve.token,
+  };
+}
+
 // Why there is no pool: another chain, not a token, or just no pool.
 async function diagnose(coin, found) {
   let code = found.code;
@@ -154,7 +238,14 @@ async function lookup(address, window, opts) {
   const startP = endP.then((end) => blockAtTime(end.time - secs, { number: end.block, time: end.time }));   // runs while the pool search runs
   endP.catch(() => {}); startP.catch(() => {});
 
-  const found = await poolsFor(coin, stocks);
+  // A Pons coin still on its launch curve has no pool yet: its price lives on the curve.
+  const curveP = detectCurve(coin).catch(() => null);
+  const poolsP = poolsFor(coin, stocks);
+  poolsP.catch(() => {});
+  const curve = await curveP;
+  if (curve && !curve.graduated) return curveLookup({ coin, curve, win, secs, endP, startP, stocks, pinned, progress });
+
+  const found = await poolsP;
   if (!found.cands.length) await diagnose(coin, found);
   let ranked = found.ranked;
   if (opts.poolId) ranked = found.cands.filter((c) => c.id === String(opts.poolId).toLowerCase() && c.readable);

@@ -10,6 +10,8 @@ import './data.test.js';        // DATA builder
 // import './card.test.js';     // CARD builder
 import './stickers.test.js';    // STICKERS builder
 // import './page.test.js';     // PAGE builder
+import './integration.test.js'; // curves, stock note, lookalike, X-post wording
+import './markethours.test.js'; // off-hours mode calendar
 // =================== END OF TEST FILES ================
 
 const inBrowser = typeof document !== 'undefined';   // note: browsers also have a print() (it prints the page)
