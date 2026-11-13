@@ -360,60 +360,14 @@ export function scannedDate(iso = BOARD_SCANNED_AT) {
   }
 }
 
-// ---- tapping a row: run the main tool for that coin ------------------------------------------
-// Same window as the card is showing: fill the paste box and submit it (src/app.js does the rest).
-// Different window: open ?ca=…&w=… so the card uses the board's window.
-export function openCoin(address, w) {
-  const input = document.getElementById('ca-input');
-  const form = document.getElementById('paste-form');
-  let shownWindow = null;
-  try { shownWindow = parseWindow(new URLSearchParams(location.search).get('w'), SETTINGS); } catch (e) { /* none */ }
-  if (input && form && shownWindow === w) {
-    input.value = address;
-    if (typeof form.requestSubmit === 'function') form.requestSubmit();
-    else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    const out = document.getElementById('result');
-    if (out && out.firstElementChild) {
-      try { out.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' }); } catch (e) { out.scrollIntoView(); }
-    }
-    return;
-  }
-  try { sessionStorage.setItem(HANDOFF, address); } catch (e) { /* no storage: the card still loads, unscrolled */ }
-  try {
-    const u = new URL(location.href);
-    u.searchParams.set('ca', address);
-    u.searchParams.set('w', w);
-    u.hash = '';
-    location.assign(u.pathname + u.search);
-  } catch (e) {
-    location.assign('?ca=' + encodeURIComponent(address) + '&w=' + encodeURIComponent(w));
-  }
-}
-
-// After that reload, src/app.js draws the card for ?ca on its own (without scrolling): bring it into view once.
-const HANDOFF = 'bts-board-open';
-export function finishHandoff() {
-  let want = null;
-  try { want = sessionStorage.getItem(HANDOFF); sessionStorage.removeItem(HANDOFF); } catch (e) { return; }
-  let ca = null;
-  try { ca = (new URLSearchParams(location.search).get('ca') || '').trim().toLowerCase(); } catch (e) { /* none */ }
-  const out = document.getElementById('result');
-  if (!want || want !== ca || !out) return;
-  const go = () => {
-    try { out.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' }); } catch (e) { out.scrollIntoView(); }
-  };
-  if (out.firstElementChild) { go(); return; }
-  if (typeof MutationObserver !== 'function') return;
-  const mo = new MutationObserver(() => { if (out.firstElementChild) { mo.disconnect(); go(); } });
-  mo.observe(out, { childList: true });
-  setTimeout(() => mo.disconnect(), 10000);
+// ---- tapping a row: the main tool opens that coin in the board's window, in place -------------
+// src/app.js listens for this event and runs the lookup (no page reload, so the board keeps its window and rows).
+export const OPEN_EVENT = 'bts:open';
+export function openCoin(address, w, target = document) {
+  target.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { address, window: w } }));
 }
 
 // ---- DOM ----------------------------------------------------------------------------------------
-const reducedMotion = () => {
-  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
-};
-
 function h(tag, props, ...kids) {
   const el = document.createElement(tag);
   if (props) {
@@ -582,6 +536,5 @@ export function initBoard(section, opts = {}) {
 
   renderBoardState(panel, { kind: 'loading', count: coins.length }, ctx);
   if (opts.autoload !== false) whenNear(section, () => run(current));
-  finishHandoff();
   return { run, show: (state) => renderBoardState(panel, state, ctx), panel };
 }

@@ -60,9 +60,10 @@ export function summarize(pieces) {
   };
 }
 
-// '17h 30m', '6h', '45m', '135h 30m' (whole minutes; calendar time, so it adds up exactly).
+// '17h 30m', '6h', '45m', '135h 30m'. Whole minutes, rounded down like the card's age() ("26 minutes old"),
+// so the two never disagree and a stretch is never made to sound longer than it was.
 export function span(seconds) {
-  const m = isNum(seconds) && seconds > 0 ? Math.round(seconds / 60) : 0;
+  const m = isNum(seconds) && seconds > 0 ? Math.floor(seconds / 60) : 0;
   const hh = Math.floor(m / 60), mm = m % 60;
   if (!hh) return mm + 'm';
   return hh + 'h' + (mm ? ' ' + mm + 'm' : '');

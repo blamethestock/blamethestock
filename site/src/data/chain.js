@@ -1,6 +1,6 @@
 // Reads from Robinhood Chain: blocks and their times, pool prices (sqrtPriceX96) at a given block,
 // Swap/Initialize logs as a fallback, token decimals, and the stock-token check.
-import { rpc, rpcBatch, rpcAny, RpcError } from './rpc.js';
+import { rpc, rpcBatch, rpcAny, RpcError, byHealth, logOpts } from './rpc.js';
 import * as K from './constants.js';
 
 const tsCache = new Map();      // block -> unix seconds
@@ -79,6 +79,20 @@ export async function headBlock() {
   return { number, time };
 }
 
+// A second opinion when the head looks old: the newest head publicnode and dRPC report (one try each, side by side).
+export async function otherHead() {
+  const got = await Promise.all(['publicnode', 'drpc'].map((ep) => rpc(ep, 'eth_getBlockByNumber', ['latest', false], { tries: 1 }).catch(() => null)));
+  let best = null;
+  for (const b of got) {
+    if (!b || !b.number) continue;
+    const number = parseInt(b.number, 16), time = parseInt(b.timestamp, 16);
+    tsCache.set(number, time);
+    if (!best || number > best.number) best = { number, time };
+  }
+  if (!best) throw new RpcError('no head');
+  return best;
+}
+
 // Timestamps for several blocks (cached), one batch on the official RPC, then the others.
 export async function blockTimes(ns) {
   const need = [...new Set(ns.filter((n) => !tsCache.has(n)))];
@@ -86,7 +100,7 @@ export async function blockTimes(ns) {
     const calls = need.map((n) => ({ method: 'eth_getBlockByNumber', params: [toHex(n), false] }));
     let res = null;
     // One quick try per endpoint: on a 429 it is faster to ask the next one than to wait.
-    for (const [ep, tries] of [['official', 1], ['publicnode', 2], ['drpc', 3]]) {
+    for (const [ep, tries] of byHealth([['official', 1], ['publicnode', 2], ['drpc', 3]])) {
       try {
         res = await rpcBatch(ep, calls, { tries });
         if (res.every((r) => r.result)) break;
@@ -148,7 +162,7 @@ export const blockAtTime = (T, ref) => findBlockAtTime(T, ref, blockTimes);
 // node doesn't stop every lookup. Throws when an item still has a retryable error on both.
 export async function batchLatest(calls) {
   let last = null;
-  for (const [ep, tries] of [['official', 2], ['drpc', 3]]) {
+  for (const [ep, tries] of byHealth([['official', 2], ['drpc', 3]])) {
     try {
       const res = await rpcBatch(ep, calls, { tries });
       const bad = res.find((r) => r.error && r.error.retryable);
@@ -217,7 +231,7 @@ export async function readSqrtMany(items, { archive = false } = {}) {
     const key = it.pool.id + '@' + it.block;
     if (readCache.has(key)) out[i] = readCache.get(key); else todo.push(i);
   });
-  const order = archive ? [['drpc', 4]] : [['official', 2], ['drpc', 4]];
+  const order = archive ? [['drpc', 4]] : byHealth([['official', 2], ['drpc', 4]]);
   for (const [ep, tries] of order) {
     if (!todo.length) break;
     let res;
@@ -278,7 +292,7 @@ function initFilter(pool) {
 async function lastLogIn(filter, from, to, depth = 0) {
   if (from > to) return null;
   try {
-    const logs = await rpc('official', 'eth_getLogs', [{ ...filter, fromBlock: toHex(from), toBlock: toHex(to) }]);
+    const logs = await rpc('official', 'eth_getLogs', [{ ...filter, fromBlock: toHex(from), toBlock: toHex(to) }], logOpts());
     if (!logs.length) return null;
     return logs.reduce((a, b) => (parseInt(b.blockNumber, 16) > parseInt(a.blockNumber, 16) ||
       (b.blockNumber === a.blockNumber && parseInt(b.logIndex, 16) > parseInt(a.logIndex, 16)) ? b : a));
@@ -306,10 +320,11 @@ export async function findInitialize(pool, { maxBlock, hintBlock = null } = {}) 
 }
 
 // Price at a block from the last Swap at or before it; with no swap since creation, the Initialize price.
-// Returns 0n when the pool was created after `block`.
+// Returns 0n when the pool was created after `block`. The search stops at the pool's birth when it is known
+// (pool.createdBlock, or an Initialize log found earlier).
 export async function sqrtFromLogs(pool, block) {
   const f = swapFilter(pool);
-  const floor = pool.createdBlock || 0;
+  const floor = pool.createdBlock || (initCache.has(pool.id) ? initCache.get(pool.id).block : 0);
   const edges = [0, 2000, 20000, 200000, 2000000];
   for (let k = 1; ; k++) {
     const nearEdge = k < edges.length ? edges[k - 1] : edges[edges.length - 1] + (k - edges.length) * 10000000;

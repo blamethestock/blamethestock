@@ -6,13 +6,39 @@ let fetchFn = (...a) => fetch(...a);
 let sleepFn = (ms) => new Promise((r) => setTimeout(r, ms));
 let backoffMs = [400, 800, 1600];
 let useTimeouts = true;
+let pageUrl = null;            // tests: stands in for location.href (serverTime)
 
-// Tests swap the network out: _setTransport({ fetch, sleep, backoff, timeouts: false })
-export function _setTransport({ fetch: f, sleep, backoff, timeouts } = {}) {
+// Tests swap the network out: _setTransport({ fetch, sleep, backoff, timeouts: false, pageUrl })
+// (also forgets which endpoints were cooling, so one test's outage doesn't steer the next).
+export function _setTransport({ fetch: f, sleep, backoff, timeouts, pageUrl: page } = {}) {
   if (f) fetchFn = f;
   if (sleep) sleepFn = sleep;
   if (backoff) backoffMs = backoff;
   if (timeouts !== undefined) useTimeouts = !!timeouts;
+  if (page !== undefined) pageUrl = page;
+  resetHealth();
+}
+
+// ---- endpoint health ---------------------------------------------------------------------------
+// After a timeout or a network error (the official node's 429 also looks like one in a browser) an endpoint
+// "cools" for a while: every fallback order asks it last, so a hanging node costs one timeout, not one per step.
+export const COOL_MS = 45000;
+const coolUntil = {};
+export function resetHealth() { for (const k of Object.keys(coolUntil)) delete coolUntil[k]; }
+export function markCooling(name) { coolUntil[name] = Date.now() + COOL_MS; }
+export function isCooling(name) { return (coolUntil[name] || 0) > Date.now(); }
+// Same order, cooling endpoints moved to the end. Items are names or [name, tries] pairs.
+export function byHealth(list) {
+  const cool = (x) => isCooling(Array.isArray(x) ? x[0] : x);
+  return list.filter((x) => !cool(x)).concat(list.filter(cool));
+}
+
+// eth_getLogs has no other source than the official node: wait longer between tries (a 429 burst passes).
+// While it is cooling (a 429 also cools it) up to 3 tries, so an unreachable node costs at most 1 + 2 s here;
+// a hanging node is asked once anyway (a timed-out request is never retried on the same node).
+export const LOG_BACKOFF = [1000, 2000, 4000, 8000];
+export function logOpts(tries = 4) {
+  return { tries: isCooling('official') ? Math.min(tries, 3) : tries, backoff: LOG_BACKOFF };
 }
 
 // requests = HTTP requests (a JSON-RPC batch is one); calls = JSON-RPC calls inside them.
@@ -70,21 +96,32 @@ async function inLane(name, max, fn) {
 }
 
 // ---- one HTTP request with a timeout ------------------------------------------------------
-async function request(url, init, timeoutMs) {
+async function request(url, init, timeoutMs, raw = false) {
   const ctrl = useTimeouts && typeof AbortController === 'function' ? new AbortController() : null;
   let timer = null;
   const racers = [fetchFn(url, ctrl ? { ...init, signal: ctrl.signal } : init)];
   if (useTimeouts) {
     racers.push(new Promise((_, rej) => {
       timer = setTimeout(() => {
+        // Reject first: aborting rejects fetch() at once, and the race must report the timeout, not the abort.
+        rej(Object.assign(new RpcError('timeout', { retryable: true }), { transport: true, timedOut: true }));
         if (ctrl) ctrl.abort();
-        rej(new RpcError('timeout', { retryable: true }));
       }, timeoutMs);
     }));
   }
   try {
     const res = await Promise.race(racers);
+    if (raw) return res;
     if (!res.ok) {
+      // dRPC sends some JSON-RPC errors (e.g. "Unknown state", which passes in a moment) with HTTP 400 when the
+      // request wasn't a batch. Hand those on as normal JSON-RPC errors so they are classified (and retried) like
+      // the same error inside a batch.
+      if (res.status === 400 && !raw) {
+        let parsed = null;
+        try { parsed = await res.json(); } catch (e) { /* not JSON */ }
+        const items = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+        if (items.length && items.every((x) => x && x.jsonrpc && x.error)) return parsed;
+      }
       const retryable = res.status === 429 || res.status === 408 || res.status >= 500;
       throw new RpcError('HTTP ' + res.status, { code: res.status, retryable });
     }
@@ -93,7 +130,7 @@ async function request(url, init, timeoutMs) {
     if (e instanceof RpcError) throw e;
     // fetch() rejects with a TypeError on network failures; the official RPC's 429 also lands here
     // because its CORS header is malformed. Treat all of them as "back off and try again".
-    throw new RpcError('network: ' + ((e && e.message) || e), { retryable: true });
+    throw Object.assign(new RpcError('network: ' + ((e && e.message) || e), { retryable: true }), { transport: true });
   } finally {
     if (timer !== null && typeof clearTimeout === 'function') clearTimeout(timer);
   }
@@ -102,24 +139,25 @@ async function request(url, init, timeoutMs) {
 // ---- JSON-RPC ------------------------------------------------------------------------------
 // calls: [{ method, params }]. Returns one entry per call: { result } or { error: RpcError }.
 // Transport failures (after retries) throw an RpcError.
-export async function rpcBatch(endpointName, calls, { tries = 4, timeoutMs = endpointName === 'official' ? 5000 : 10000 } = {}) {
+// backoff: waits between tries (ms), default the transport's.
+export async function rpcBatch(endpointName, calls, { tries = 4, timeoutMs = endpointName === 'official' ? 5000 : 10000, backoff = null } = {}) {
   // The official node answers fast or not at all, so give up on it sooner and fall over to the others.
   const ep = RPC[endpointName];
   if (!ep) throw new Error('unknown endpoint ' + endpointName);
   const out = new Array(calls.length);
   const chunks = [];
   for (let i = 0; i < calls.length; i += ep.batchMax) chunks.push(calls.slice(i, i + ep.batchMax).map((c, j) => ({ ...c, i: i + j })));
-  await Promise.all(chunks.map((chunk) => sendChunk(endpointName, ep, chunk, out, tries, timeoutMs)));
+  await Promise.all(chunks.map((chunk) => sendChunk(endpointName, ep, chunk, out, tries, timeoutMs, backoff || backoffMs)));
   return out;
 }
 
-async function sendChunk(name, ep, chunk, out, tries, timeoutMs) {
+async function sendChunk(name, ep, chunk, out, tries, timeoutMs, waits) {
   let pending = chunk;
   let lastErr = null;
   for (let attempt = 0; attempt < tries && pending.length; attempt++) {
     if (attempt > 0) {
       stats.retries++;
-      await sleepFn(backoffMs[Math.min(attempt - 1, backoffMs.length - 1)]);
+      await sleepFn(waits[Math.min(attempt - 1, waits.length - 1)]);
     }
     const body = pending.length === 1
       ? { jsonrpc: '2.0', id: pending[0].i, method: pending[0].method, params: pending[0].params }
@@ -133,7 +171,9 @@ async function sendChunk(name, ep, chunk, out, tries, timeoutMs) {
     } catch (e) {
       lastErr = e instanceof RpcError ? e : new RpcError(String(e), { retryable: true });
       lastErr.endpoint = name;
-      if (!lastErr.retryable) break;
+      if (lastErr.transport) markCooling(name);
+      // A node that let a request time out is not asked the same thing again: the caller's next node answers sooner.
+      if (!lastErr.retryable || lastErr.timedOut) break;
       continue;
     }
     const list = Array.isArray(res) ? res : [res];
@@ -166,17 +206,31 @@ export async function rpc(endpointName, method, params, opts) {
 }
 
 // Tries each endpoint in turn until one answers (two tries each: falling over beats waiting out a 429).
+// Cooling endpoints are asked last.
 export async function rpcAny(endpointNames, method, params, opts = {}) {
   let last;
-  for (const name of endpointNames) {
+  for (const name of byHealth(endpointNames)) {
     try { return await rpc(name, method, params, { tries: 2, ...opts }); } catch (e) { last = e; }
   }
   throw last;
 }
 
+// The web server's clock (unix s) from a same-origin HEAD request's Date header; null when there is
+// no page (jsc), no answer or no usable header. Used to double-check "the chain looks old" against a clock
+// that isn't the visitor's.
+export async function serverTime() {
+  const url = pageUrl || (typeof location !== 'undefined' && location && location.href) || null;
+  if (!url || !/^https?:/.test(url)) return null;
+  try {
+    const res = await request(url, { method: 'HEAD', cache: 'no-store' }, 5000, true);
+    const d = Date.parse(res && res.headers && typeof res.headers.get === 'function' ? res.headers.get('date') || '' : '');
+    return Number.isFinite(d) ? d / 1000 : null;
+  } catch (e) { return null; }
+}
+
 // ---- plain JSON GET (DexScreener, GeckoTerminal) ------------------------------------------
 // Returns parsed JSON, or null when the service is unavailable (after retries).
-export async function getJson(url, { tries = 3, timeoutMs = 8000, host = 'http' } = {}) {
+export async function getJson(url, { tries = 2, timeoutMs = 5000, host = 'http' } = {}) {
   for (let attempt = 0; attempt < tries; attempt++) {
     if (attempt > 0) { stats.retries++; await sleepFn(backoffMs[Math.min(attempt - 1, backoffMs.length - 1)]); }
     try {

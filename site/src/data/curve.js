@@ -1,7 +1,7 @@
 // Pons launch curves. A coin launched on Pons trades on its own bonding curve (PonsV2BondingCurve)
 // until it "graduates" into a Uniswap v4 pool. Before that, its price lives only on the curve:
 // price of the coin in the curve's pair token = quoteReserve / tokenReserve (constant-product curve).
-import { rpc, rpcBatch } from './rpc.js';
+import { rpc, rpcBatch, byHealth, logOpts } from './rpc.js';
 import { batchLatest, ethCall, wordAt, toHex } from './chain.js';
 
 export const SEL_CURVE = '0x7165485d';          // curve()            on a Pons launch token
@@ -30,7 +30,10 @@ export function decodeString(hex) {
 }
 
 const curveCache = new Map();
-export function clearCurveCache() { curveCache.clear(); }
+const birthCache = new Map();   // curve -> { born } (its Initialized block) or { below } (born before that block)
+export function clearCurveCache() { curveCache.clear(); birthCache.clear(); }
+// Drops the cached Pons check for one coin (it just graduated: ask the chain again next time).
+export function forgetCurve(coin) { curveCache.delete(coin); }
 
 // Is `coin` a Pons launch token? -> { curve, pairToken, graduated, symbol } | null.
 // Two small batches; any token without a matching curve() returns null.
@@ -61,7 +64,7 @@ export async function symbolOf(token) {
 export async function readCurve(curve, block, { archive = false, withReal = false } = {}) {
   const calls = [ethCall(curve, SEL_GET_RESERVES, block)];
   if (withReal) calls.push(ethCall(curve, SEL_REAL_QUOTE, block));
-  const order = archive ? [['drpc', 4]] : [['official', 2], ['drpc', 4]];
+  const order = archive ? [['drpc', 4]] : byHealth([['official', 2], ['drpc', 4]]);
   let lastErr = null;
   for (const [ep, tries] of order) {
     let res;
@@ -79,13 +82,26 @@ export async function readCurve(curve, block, { archive = false, withReal = fals
   throw lastErr || new Error('curve read failed');
 }
 
-// The block where the curve was created (its Initialized event), searching back from maxBlock.
-export async function findCurveStart(curve, maxBlock) {
-  const ranges = [[Math.max(0, maxBlock - 2000000), maxBlock]];
-  for (let to = maxBlock - 2000001; to >= 0; to -= 10000000) ranges.push([Math.max(0, to - 9999999), to]);
-  for (const [from, to] of ranges) {
-    const logs = await rpc('official', 'eth_getLogs', [{ address: curve, topics: [TOPIC_CURVE_INITIALIZED], fromBlock: toHex(from), toBlock: toHex(to) }]);
-    if (logs && logs.length) return parseInt(logs[0].blockNumber, 16);
+// The block where the curve was created (its Initialized event), searching back from maxBlock (the curve must
+// exist there) but not below minBlock. Returns that block, or null when the curve is older than minBlock (or no
+// event was found at all). The birth block never changes, so what each search learns is kept per curve.
+export async function findCurveStart(curve, maxBlock, { minBlock = 0 } = {}) {
+  const known = birthCache.get(curve) || {};
+  if (known.born != null) return known.born >= minBlock ? known.born : null;
+  if (known.below != null && known.below <= minBlock) return null;
+  let to = known.below != null ? Math.min(maxBlock, known.below - 1) : maxBlock;
+  let size = 2000000;                                              // ~2.4 days first, then the node's 10M-block limit
+  while (to >= Math.max(0, minBlock)) {
+    const from = Math.max(0, minBlock, to - size + 1);
+    const logs = await rpc('official', 'eth_getLogs', [{ address: curve, topics: [TOPIC_CURVE_INITIALIZED], fromBlock: toHex(from), toBlock: toHex(to) }], logOpts());
+    if (logs && logs.length) {
+      const born = parseInt(logs[0].blockNumber, 16);
+      birthCache.set(curve, { born });
+      return born >= minBlock ? born : null;
+    }
+    birthCache.set(curve, { below: from });
+    to = from - 1;
+    size = 10000000;
   }
   return null;
 }

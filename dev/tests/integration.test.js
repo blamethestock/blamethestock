@@ -2,6 +2,7 @@
 import { suite, test, eq, near, ok } from './harness.js';
 import { buildResult } from '../../site/src/core/verdict.js';
 import { decodeString, curvePrice } from '../../site/src/data/curve.js';
+import { _setTransport, rpcBatch } from '../../site/src/data/rpc.js';
 
 suite('integration');
 
@@ -83,4 +84,29 @@ test('curvePrice = quote / token reserves, decimals applied', () => {
   near(curvePrice({ quote: 1680172858019835616n, token: 999897118907134748340192351n }, 18, 18), 1.6803457338253231e-9, 1e-20);
   near(curvePrice({ quote: 2000000n, token: 1000000000000000000n }, 18, 6), 2, 1e-12);   // USDG (6 decimals) pair
   ok(Number.isNaN(curvePrice({ quote: 1n, token: 0n }, 18, 18)));
+});
+
+test('archive "Unknown state" sent with HTTP 400 is retried, not treated as final', async () => {
+  let n = 0;
+  _setTransport({ sleep: async () => {}, backoff: [0], timeouts: false, fetch: async () => {
+    n++;
+    if (n === 1) return { ok: false, status: 400, json: async () => ({ jsonrpc: '2.0', id: 0, error: { code: 27, message: 'Unknown state. First available state is 1' } }) };
+    return { ok: true, status: 200, json: async () => ({ jsonrpc: '2.0', id: 0, result: '0x01' }) };
+  } });
+  const out = await rpcBatch('drpc', [{ method: 'eth_call', params: [{ to: '0x0000000000000000000000000000000000000001', data: '0x' }, '0x1'] }], { tries: 3 });
+  eq(out[0].result, '0x01');
+  eq(n, 2);
+});
+
+test('a real HTTP 400 that is not a JSON-RPC error still fails without retrying', async () => {
+  let n = 0;
+  _setTransport({ sleep: async () => {}, backoff: [0], timeouts: false, fetch: async () => {
+    n++;
+    return { ok: false, status: 400, json: async () => { throw new Error('not json'); } };
+  } });
+  let threw = false;
+  try { await rpcBatch('drpc', [{ method: 'eth_call', params: [{ to: '0x0000000000000000000000000000000000000001', data: '0x' }, '0x1'] }], { tries: 3 }); }
+  catch (e) { threw = /HTTP 400/.test(e.message); }
+  ok(threw, 'should throw HTTP 400');
+  eq(n, 1);
 });

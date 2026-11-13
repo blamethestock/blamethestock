@@ -150,7 +150,15 @@ export function pickUsdPool(cands, { usdgOnly = false, uniswapOnly = false } = {
 // All pools for a token on Robinhood Chain. available=false when neither source answered.
 // code = the address's contract code when it was looked up (no pools on DexScreener), else null.
 export async function findPools(token, stocks) {
-  const ds = await getJson(`${K.DEXSCREENER}/token-pairs/v1/robinhood/${token}`, { host: 'dexscreener' });
+  const dsUrl = `${K.DEXSCREENER}/token-pairs/v1/robinhood/${token}`;
+  // GeckoTerminal allows ~5 calls a minute per visitor and its 429 has no CORS header: one try only.
+  const gecko = () => getJson(`${K.GECKOTERMINAL}/networks/robinhood/tokens/${token}/pools`, { host: 'geckoterminal', tries: 1 });
+  let ds = await getJson(dsUrl, { host: 'dexscreener', tries: 1, timeoutMs: 5000 });
+  let gtP = null;
+  if (ds === null) {               // DexScreener didn't answer: ask GeckoTerminal now, and DexScreener once more alongside
+    gtP = gecko();
+    ds = await getJson(dsUrl, { host: 'dexscreener', tries: 1, timeoutMs: 5000 });
+  }
   let cands = Array.isArray(ds) ? parseDexScreener(token, ds, stocks) : [];
   let available = Array.isArray(ds) || !!(ds && ds.notFound);
   let code = null;
@@ -159,9 +167,8 @@ export async function findPools(token, stocks) {
     try { code = await getCode(token); } catch (e) { code = null; }
   }
   if (!rankCandidates(cands).length && code !== '0x') {
-    // Nothing readable on DexScreener (it can drop quiet pools). GeckoTerminal allows ~5 calls a minute
-    // per visitor and its 429 has no CORS header: one try only.
-    const gt = await getJson(`${K.GECKOTERMINAL}/networks/robinhood/tokens/${token}/pools`, { host: 'geckoterminal', tries: 1 });
+    // Nothing readable on DexScreener (it can drop quiet pools): the backup.
+    const gt = await (gtP || gecko());
     if (gt && Array.isArray(gt.data)) {
       const seen = new Set(cands.map((c) => c.id));
       cands = cands.concat(parseGecko(token, gt, stocks).filter((c) => !seen.has(c.id)));

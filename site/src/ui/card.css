@@ -283,6 +283,16 @@
   .bts-tab { flex: 1 1 0; min-width: 0; }
 }
 
+/* The loading card can hold keyboard focus (tabindex -1) while it has no buttons: no ring around the whole card. */
+.bts-card[tabindex="-1"]:focus { outline: none; }
+
+/* ---- Next to the paste box (index.html): the "not an address" line and the busy Blame button ----- */
+.paste-hint { margin: 12px 8px 0; font-size: 15px; line-height: 1.4; color: var(--fg, #fff); overflow-wrap: anywhere; }
+.paste-hint:empty { margin: 0; }
+#paste-submit[aria-busy="true"] { cursor: progress; animation: bts-busy .8s ease-in-out infinite alternate; }
+@keyframes bts-busy { to { opacity: .55; } }
+
 @media (prefers-reduced-motion: reduce) {
   .bts-card, .bts-card * { animation: none !important; transition: none !important; }
+  #paste-submit[aria-busy="true"] { animation: none; opacity: .6; }
 }

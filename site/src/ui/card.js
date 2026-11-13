@@ -24,7 +24,7 @@ const LABELS = {
 
 const COUNT_MS = 900;          // headline number counts up
 const BAR_MS = 700;            // split bar slides from the middle (timing lives in card.css)
-const RETRY_CODES = ['rpc-failed', 'stale'];
+const RETRY_CODES = ['rpc-failed', 'stale', 'search-failed'];   // worth a second try: "Try again" + the window tabs
 const WINDOW_CODES = ['pair-too-new'];
 
 let uid = 0;
@@ -65,6 +65,24 @@ function currentCard(el) {
 }
 
 const shortAddr = (a) => (typeof a === 'string' && a.length > 12 ? a.slice(0, 6) + '…' + a.slice(-4) : a || '');
+
+// ---- Keyboard focus across re-renders ---------------------------------------------------------
+// A new card replaces the old one, and with it the button that had focus ("Try again", a tab…). Without help
+// the focus drops to the page and the next Tab starts again at the top. focusIn() notes where it was before
+// the swap ('tab', 'other', or null when it wasn't in the card); refocus() puts it back on the new card:
+// the selected tab when it was on a tab, else the first button, else the card itself.
+function focusIn(card) {
+  const a = typeof document !== 'undefined' ? document.activeElement : null;
+  if (!card || !a || !card.contains(a)) return null;
+  return a.getAttribute && a.getAttribute('role') === 'tab' ? 'tab' : 'other';
+}
+function refocus(card, was) {
+  if (!was || !card) return;
+  const tab = card.querySelector('[role="tab"][aria-selected="true"]');
+  const btn = card.querySelector('.bts-btn:not([aria-disabled="true"])');
+  const target = (was === 'tab' && tab) || btn || tab || card;
+  try { target.focus({ preventScroll: true }); } catch (e) { target.focus(); }
+}
 
 // ---- Window tabs ------------------------------------------------------------------------------
 function windowTabs(id, current, onWindow, settings) {
@@ -284,8 +302,7 @@ export function renderResult(el, result, opts = {}) {
   const settings = opts.settings || SETTINGS;
   const before = currentCard(el);
   const sameCoin = before && before.dataset.coin && result.coin && before.dataset.coin === result.coin.address;
-  const hadTabFocus = !!(before && before.contains(document.activeElement)
-    && document.activeElement.getAttribute('role') === 'tab');
+  const hadFocus = focusIn(before);
   prepare(el);
 
   const id = `bts${++uid}`;
@@ -330,10 +347,7 @@ export function renderResult(el, result, opts = {}) {
   slideBar(split.bar, track);
   running.set(el, () => stops.forEach((fn) => fn()));
 
-  if (hadTabFocus) {
-    const sel = card.querySelector('[role="tab"][aria-selected="true"]');
-    if (sel) sel.focus({ preventScroll: true });
-  }
+  refocus(card, hadFocus && 'tab');      // a result always has tabs: focus goes back to the selected one
   // On phones the share sheet needs the picture ready the moment "Save image" is tapped.
   if (opts.prepareImage !== false && coarsePointer()) {
     setTimeout(() => { if (card.isConnected) prepareShareImage(result, settings); }, COUNT_MS + BAR_MS);
@@ -402,6 +416,7 @@ export function renderLoading(el, text, opts = {}) {
     return cur;
   }
   prepare(el);
+  const hadFocus = focusIn(cur);
 
   const tabs = cur && cur.querySelector('[role="tablist"]');
   if (cur && tabs && opts.coin && cur.dataset.coin === opts.coin && opts.window) {
@@ -426,18 +441,20 @@ export function renderLoading(el, text, opts = {}) {
         a.setAttribute('tabindex', '-1');
       }
     }
+    refocus(cur, hadFocus);
     return cur;
   }
 
   const card = h('article', {
     class: 'bts-card', 'data-state': 'loading', 'data-coin': opts.coin || '', 'data-window': opts.window || '',
-    'aria-label': msg,
+    'aria-label': msg, tabindex: '-1',   // can hold keyboard focus while it has no buttons
   },
   h('div', { class: 'bts-top', 'aria-hidden': 'true' },
     h('span', { class: 'bts-skel bts-skel-tag' }), h('span', { class: 'bts-skel bts-skel-tabs' })),
   skeletonBody(msg));
   if (!cur && !reducedMotion()) card.classList.add('is-entering');
   el.replaceChildren(card);
+  refocus(card, hadFocus);
   return card;
 }
 
@@ -461,11 +478,14 @@ export function renderError(el, err, opts = {}) {
     || (settings.wording && settings.wording.errors && settings.wording.errors[e.code])
     || SETTINGS.wording.errors['rpc-failed'];
   const cur = currentCard(el);
+  const hadFocus = focusIn(cur);
   prepare(el);
 
   const id = `bts${++uid}`;
   const parts = [];
-  const showTabs = WINDOW_CODES.includes(e.code) && typeof opts.onWindow === 'function' && opts.window;
+  // Tabs stay on errors where another window (or the same one, a moment later) can still work.
+  const showTabs = (WINDOW_CODES.includes(e.code) || RETRY_CODES.includes(e.code))
+    && typeof opts.onWindow === 'function' && opts.window;
   if (showTabs) {
     const who = e.symbol ? e.symbol : h('span', { class: 'bts-addr', text: shortAddr(opts.coin) });
     parts.push(topRow(id, who, opts.window, opts.onWindow, settings));
@@ -495,16 +515,36 @@ export function renderError(el, err, opts = {}) {
   }, parts);
   if (!cur && !reducedMotion()) card.classList.add('is-entering');
   el.replaceChildren(card);
+  refocus(card, hadFocus);
   return card;
 }
 
-// Puts the cursor back in the paste box (used by "Try another coin").
+// ---- Public: empty the slot (an entry that isn't an address says so under the paste box instead) ----
+export function clearCard(el) {
+  if (!el) return;
+  prepare(el);
+  el.replaceChildren();
+}
+
+// Puts the cursor back in the paste box (used by "Try another coin", the menu and an empty "Blame").
+// The page only scrolls when the box isn't already on screen.
 export function focusInput() {
   const input = document.getElementById('ca-input');
   if (!input) return;
-  try {
-    input.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'center' });
-  } catch (e) { /* old browsers */ }
+  if (!onScreen(input)) {
+    try {
+      input.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'center' });
+    } catch (e) { /* old browsers */ }
+  }
   try { input.focus({ preventScroll: true }); } catch (e) { input.focus(); }
   try { input.select(); } catch (e) { /* not selectable */ }
+}
+
+// Fully visible, below the floating menu (~72px).
+function onScreen(node) {
+  try {
+    const r = node.getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    return r.top >= 72 && r.bottom <= vh;
+  } catch (e) { return false; }
 }

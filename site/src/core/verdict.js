@@ -108,14 +108,19 @@ export function buildResult(pi, settings = SETTINGS, opts = {}) {
   const subline = showOwnMove ? fill(w.ownMove, vars) : '';
 
   const onCurve = pool.source === 'pons-curve';      // a Pons coin still on its launch curve (no pool yet)
+  // A graduated Pons coin whose window starts on its launch curve and ends in its pool. Its "measured in" note says
+  // so. Since launch, its window starts at the curve's birth (data/index.js curveStart), so the age is the coin's,
+  // not its younger pool's: the curve sentence. The low-money line is the pool one (measured in the pool).
+  const curveThenPool = pool.source === 'pons-curve-then-pool';
   const notes = [];
-  const sinceLaunchW = onCurve && notesW.sinceLaunchCurve ? notesW.sinceLaunchCurve : notesW.sinceLaunch;
+  const sinceLaunchW = (onCurve || curveThenPool) && notesW.sinceLaunchCurve ? notesW.sinceLaunchCurve : notesW.sinceLaunch;
   if (pi.sinceLaunch) notes.push(fill(sinceLaunchW, { ...vars, window }));   // "not the full 24h"
   // No trades = the price is old, so say so for every pair kind (a dollar pair too: its 0.0% is a stale price).
   if (pi.tradedInWindow === false) notes.push(fill(notesW.noTrades, vars));
   // Brief, logic 7: a stock token's price is its on-chain price, not the share price.
   if (kind === 'stock' && notesW.stockToken) notes.push(fill(notesW.stockToken, vars));
-  notes.push(fill(onCurve && notesW.curve ? notesW.curve : notesW.pool, vars));
+  notes.push(fill(onCurve && notesW.curve ? notesW.curve
+    : curveThenPool && notesW.curveThenPool ? notesW.curveThenPool : notesW.pool, vars));
 
   const warnings = [];
   // A plain coin that copies a stock/ETH/dollar ticker (e.g. a fake "NVDA") is flagged by the data layer.

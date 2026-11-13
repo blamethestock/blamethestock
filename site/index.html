@@ -57,6 +57,19 @@
   <!-- Fetch page.js's own imports at the same time as page.js, so the headline is filled sooner. -->
   <link rel="modulepreload" href="settings.js">
   <link rel="modulepreload" href="src/ui/motion.js">
+  <!-- The same for the tool (app.js), so a shared ?ca= link starts reading the chain without waiting
+       for each level of imports in turn. -->
+  <link rel="modulepreload" href="src/data/index.js">
+  <link rel="modulepreload" href="src/data/rpc.js">
+  <link rel="modulepreload" href="src/data/chain.js">
+  <link rel="modulepreload" href="src/data/constants.js">
+  <link rel="modulepreload" href="src/data/discover.js">
+  <link rel="modulepreload" href="src/data/curve.js">
+  <link rel="modulepreload" href="src/core/math.js">
+  <link rel="modulepreload" href="src/core/format.js">
+  <link rel="modulepreload" href="src/core/verdict.js">
+  <link rel="modulepreload" href="src/ui/card.js">
+  <link rel="modulepreload" href="src/ui/share.js">
   <script type="module" src="src/ui/page.js"></script>
   <script type="module" src="src/app.js"></script>
 </head>
@@ -82,10 +95,12 @@
         <form class="paste" id="paste-form" action="./" method="get" role="search" autocomplete="off">
           <label class="visually-hidden" for="ca-input">Coin address</label>
           <input id="ca-input" name="ca" type="text" inputmode="text"
-                 placeholder="Paste a Robinhood Chain coin address (0x…)"
+                 placeholder="Paste a Robinhood Chain coin address (0x…)" aria-describedby="paste-hint"
                  autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="120">
           <button class="btn btn-white" id="paste-submit" type="submit">Blame</button>
         </form>
+        <!-- "That doesn't look like a coin address…" appears here (src/app.js; styled in src/ui/card.css) -->
+        <p class="paste-hint" id="paste-hint" aria-live="polite"></p>
         <div class="examples" id="examples" aria-label="Example coins">
           <span class="examples-label">Try</span>
         </div>

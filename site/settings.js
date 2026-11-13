@@ -129,6 +129,7 @@ export const SETTINGS = {
       lookalike: "Heads up: this {pairShort} isn't Robinhood's {pairShort} stock token. It's another coin using the same name.",
       pool: "Measured in the {poolLabel} pool.",
       curve: "Measured on its Pons launch curve. It hasn't moved to a trading pool yet.",
+      curveThenPool: "Measured on its Pons launch curve, then its {poolLabel} pool.",
       sinceLaunchCurve: "This coin is only {age} old, so this covers its whole life, not the full {window}.",
       lowLiquidityCurve: "Only {liquidity} has gone into its launch curve so far, so these numbers are shaky.",
     },
@@ -146,6 +147,7 @@ export const SETTINGS = {
       "unsupported-pool": "This coin trades in a kind of pool we can't read yet.",
       "stale": "Robinhood Chain data looks delayed right now, so we're not showing numbers. Try again in a minute.",
       "rpc-failed": "We couldn't reach Robinhood Chain just now. Try again in a minute.",
+      "search-failed": "We couldn't reach the pool search just now. Try again in a minute.",
       "pair-too-new": "What this coin is paired with is too new to measure over this window. Try a shorter one.",
     },
     // Off-hours mode (switch: features.offHoursMode). A small block under the three numbers.

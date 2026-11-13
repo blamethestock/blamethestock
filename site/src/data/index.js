@@ -2,13 +2,13 @@
 // Every price comes from Robinhood Chain at stated blocks. DexScreener/GeckoTerminal only find the pools.
 import { SETTINGS } from '../../settings.js';
 import * as K from './constants.js';
-import { stats, resetStats, rpcBatch } from './rpc.js';
+import { stats, resetStats, rpcBatch, logOpts, serverTime } from './rpc.js';
 import {
-  headBlock, blockTime, blockAtTime, readSqrtMany, findInitialize, sqrtFromLogs, tokenFacts, getCode,
+  headBlock, otherHead, blockTime, blockAtTime, readSqrtMany, findInitialize, sqrtFromLogs, tokenFacts, getCode,
   priceOf, sortTokens, clearChainCaches, findBlockAtTime, blockTimes, ethCall, wordAt, slot0Call, parseSwapLog, toHex,
 } from './chain.js';
 import { classifyAddress, findPools, pickUsdPool, otherChainPairCount } from './discover.js';
-import { detectCurve, readCurve, findCurveStart, curvePrice, symbolOf, clearCurveCache, SEL_GET_RESERVES } from './curve.js';
+import { detectCurve, readCurve, findCurveStart, curvePrice, symbolOf, clearCurveCache, forgetCurve, SEL_GET_RESERVES } from './curve.js';
 
 class DataError extends Error {
   constructor(code, extra = {}) { super(code); this.code = code; this.extra = extra; }
@@ -20,6 +20,7 @@ const cache = { pools: new Map(), end: null };
 export function clearDataCache() {
   cache.pools.clear();
   cache.end = null;
+  clockSkew = 0;
   clearChainCaches();
   clearCurveCache();
   routes.clear();
@@ -33,11 +34,14 @@ export function resetDataStats() { resetStats(); }
 
 // stocks.js (~16 KB) loads on the first lookup, not with the page.
 let stocksP = null;
+let stocksNow = null;          // the list, once loaded
 function loadStocks() {
-  if (!stocksP) stocksP = import('./stocks.js').then((m) => m.STOCKS, (e) => { stocksP = null; throw e; });
+  if (!stocksP) stocksP = import('./stocks.js').then((m) => (stocksNow = m.STOCKS), (e) => { stocksP = null; throw e; });
   return stocksP;
 }
 
+// opts.cancelled?() -> true once the caller no longer wants this answer (the visitor started another lookup):
+// the lookup stops at its next step with { ok: false, code: 'rpc-failed', detail: 'cancelled' }.
 export async function fetchPriceInput(address, window, opts = {}) {
   try {
     return await lookup(address, window, opts);
@@ -64,9 +68,12 @@ function poolsFor(token, stocks) {
   const p = findPools(token, stocks);
   cache.pools.set(token, { at: Date.now(), p });
   // A search that failed (neither source answered) must not stick for 5 minutes: drop it so the next try asks again.
-  const drop = () => { if (cache.pools.get(token) && cache.pools.get(token).p === p) cache.pools.delete(token); };
-  p.then((r) => { if (!r || !r.available) drop(); }, drop);
+  p.then((r) => { if (!r || !r.available) forgetPools(token, p); }, () => forgetPools(token, p));
   return p;
+}
+function forgetPools(token, p) {             // p: only that search (a newer one may have started meanwhile)
+  const hit = cache.pools.get(token);
+  if (hit && (p === undefined || hit.p === p)) cache.pools.delete(token);
 }
 
 // End of the window: latest block - 5 (shared for 15 s so window tabs line up), or a pinned block.
@@ -82,6 +89,47 @@ async function getEnd(pinned) {
   return p;
 }
 
+// Is the end block recent enough to show? The visitor's clock can be off and one node can lag, so before
+// saying "stale": ask the other nodes for their head (a newer one becomes the end), then judge the age by the
+// web server's clock (the Date header of a same-origin HEAD request) instead of this device's.
+let clockSkew = 0;             // seconds this device's clock runs ahead of the web server's (once measured)
+async function freshEnd(end) {
+  const limit = SETTINGS.limits.staleSeconds;
+  const age = () => Date.now() / 1000 - clockSkew - end.time;
+  if (age() <= limit) return end;
+  const head = await otherHead().catch(() => null);
+  if (head && head.number - 5 > end.block) {
+    const block = head.number - 5;
+    end = { block, time: await blockTime(block) };
+    cache.end = { at: Date.now(), p: Promise.resolve(end) };
+    if (age() <= limit) return end;
+  }
+  const server = await serverTime();
+  if (server != null) {
+    clockSkew = Date.now() / 1000 - server;
+    if (server - end.time <= limit) return end;
+  }
+  return fail('stale');
+}
+
+// The window's end block (checked for freshness unless pinned) and its start block (the last block at or before
+// end - secs). The start search begins as soon as the end is known, alongside the pool search.
+function windowSpan(endP, secs, pinned) {
+  const startOf = (end) => blockAtTime(end.time - secs, { number: end.block, time: end.time });
+  let startP = endP.then(startOf);
+  endP.catch(() => {}); startP.catch(() => {});
+  return {
+    async end() {
+      const first = await endP;
+      if (pinned) return first;
+      const end = await freshEnd(first);
+      if (end.block !== first.block) { startP = startOf(end); startP.catch(() => {}); }
+      return end;
+    },
+    start: () => startP,
+  };
+}
+
 function makeLeg(pool, base, quote) {
   const [token0, token1] = sortTokens(base, quote);
   return { id: pool.id, version: pool.version, uniswap: pool.uniswap !== false, base, quote, token0, token1, dec0: null, dec1: null, createdAt: pool.createdAt || null };
@@ -95,20 +143,25 @@ async function usdRoute(pair, stocks, depth = 0) {
     const leg = makeLeg({ id: K.WETH_USDG_POOL, version: 'v3', uniswap: true }, K.WETH, K.USDG);
     return { legs: [leg], via: { id: K.WETH_USDG_POOL, label: 'WETH/USDG' } };
   }
+  // A pool search that got no answer must not read as "no dollar pool": that would quietly switch the coin to
+  // another main pool, or call it unreadable. Say the search failed (try again) instead.
+  const search = async () => {
+    const found = await poolsFor(pair.address, stocks);
+    if (!found.available) fail('search-failed', { detail: 'pool search unavailable for ' + (pair.symbol || pair.address) });
+    return found;
+  };
   if (pair.kind === 'stock') {
     const s = stocks.get(pair.address);
     let pool = s && s.pool ? { id: s.pool, version: poolVersion(s.pool), uniswap: true } : null;
     if (!pool) {                                   // not precomputed: ask DexScreener (same rule as the build tool)
-      const found = await poolsFor(pair.address, stocks);
-      pool = pickUsdPool(found.cands, { usdgOnly: true, uniswapOnly: true });
+      pool = pickUsdPool((await search()).cands, { usdgOnly: true, uniswapOnly: true });
       if (!pool) fail('unsupported-pool', { detail: 'no dollar pool for ' + pair.symbol });
     }
     return { legs: [makeLeg(pool, pair.address, K.USDG)], via: { id: pool.id, label: pair.symbol + '/USDG' } };
   }
   // another coin: one level deep only
   if (depth > 0) fail('unsupported-pool', { detail: 'pair route too deep' });
-  const found = await poolsFor(pair.address, stocks);
-  const pick = pickUsdPool(found.cands);
+  const pick = pickUsdPool((await search()).cands);
   if (!pick) fail('unsupported-pool', { detail: 'no dollar route for ' + pair.symbol });
   const first = makeLeg(pick, pair.address, pick.pair.address);
   const label = pair.symbol + '/' + pick.pair.symbol;
@@ -129,9 +182,36 @@ function lookalike(pair, stocks) {
 
 const routePrice = (legs, sqrts) => legs.reduce((p, leg, i) => p * priceOf(leg.base, leg, sqrts[i]), 1);
 
+// A pair-pricing leg whose archive read at `block` came back empty. The archive can say "no pool" wrongly, so
+// check the pool's birth: born at or before `block` -> its last trade at or before it (the trade log stops at the
+// birth). Born later (or never found) -> the pair's dollar pool is too new for this window.
+async function legAt(leg, block, end) {
+  const hint = leg.createdAt ? end.block - Math.round((end.time - leg.createdAt) / K.BLOCK_SECONDS) : null;
+  const init = await findInitialize(leg, { maxBlock: end.block, hintBlock: hint });
+  if (!init || init.block > block) fail('pair-too-new');
+  leg.createdBlock = init.block;
+  const s = leg.uniswap ? await sqrtFromLogs(leg, block) : 0n;
+  if (s === 0n) fail('pair-too-new');
+  return s;
+}
+
+// Where a window starts for a coin priced on its Pons launch curve -> { block, sinceLaunch, reserves }.
+// The curve's birth comes first (the official node's log, kept per curve). A curve born inside the window starts
+// at its birth (a real launch: since launch); its state there is read on the official node while that node still
+// holds it (~10 min), so a brand-new coin doesn't depend on the archive node. If the log can't be read, the
+// archive says whether the curve already existed at the window's start.
+async function curveStart(curve, windowStart, endBlock) {
+  let born = null, logs = true;
+  try { born = await findCurveStart(curve, endBlock, { minBlock: windowStart + 1 }); } catch (e) { logs = false; }
+  const block = born != null ? born : windowStart;
+  const reserves = await readCurve(curve, block, { archive: endBlock - block > 5000 });
+  if (!reserves) fail('rpc-failed', { detail: logs ? 'curve unreadable at start' : 'curve start not found' });
+  return { block, sinceLaunch: born != null, reserves };
+}
+
 // A Pons coin still on its launch curve: coin price in the curve's pair token from the curve's reserves,
 // the pair's dollar price from the usual pools, both at the same start and end blocks.
-async function curveLookup({ coin, curve, win, secs, endP, startP, stocks, pinned, progress }) {
+async function curveLookup({ coin, curve, win, secs, span, stocks, pinned, progress, step }) {
   progress('Reading the Pons launch curve…');
   const pc = classifyAddress(curve.pairToken, stocks);
   const pair = { address: curve.pairToken, kind: pc.kind, symbol: pc.symbol };
@@ -155,28 +235,25 @@ async function curveLookup({ coin, curve, win, secs, endP, startP, stocks, pinne
   const decQuote = isNative ? 18 : facts.get(pair.address).decimals;
   if (decCoin == null || decQuote == null) fail('unsupported-pool', { detail: 'unknown decimals' });
 
-  const end = await endP;
-  if (!pinned && Date.now() / 1000 - end.time > SETTINGS.limits.staleSeconds) fail('stale');
+  const end = await span.end();
+  step();
   progress('Reading prices…');
   const [eCurve, eLegs] = await Promise.all([
     readCurve(curve.curve, end.block, { archive: pinned, withReal: true }),
     readSqrtMany(route.legs.map((pool) => ({ pool, block: end.block })), { archive: pinned }),
   ]);
   if (!eCurve) fail('rpc-failed', { detail: 'curve unreadable at end' });
+  if (eCurve.token === 0n) {                    // it graduated a moment ago (the Pons check was cached): look again
+    forgetCurve(coin);
+    forgetPools(coin);                          // the pool search from before graduation doesn't list its new pool
+    fail('rpc-failed', { detail: 'curve just graduated' });
+  }
   if (eLegs.some((x) => x === 0n)) fail('unsupported-pool', { detail: 'pair price pool unreadable' });
 
-  let startBlock = await startP;
-  let sinceLaunch = false;
-  let sCurve = await readCurve(curve.curve, startBlock, { archive: true });
-  if (!sCurve) {                                                // the curve is younger than the window
-    const born = await findCurveStart(curve.curve, end.block);
-    if (!born) fail('rpc-failed', { detail: 'curve start not found' });
-    if (born > startBlock) { startBlock = born; sinceLaunch = true; }
-    sCurve = await readCurve(curve.curve, startBlock, { archive: true });
-    if (!sCurve) fail('rpc-failed', { detail: 'curve unreadable at start' });
-  }
+  const { block: startBlock, sinceLaunch, reserves: sCurve } = await curveStart(curve.curve, await span.start(), end.block);
+  step();
   const sLegs = await readSqrtMany(route.legs.map((pool) => ({ pool, block: startBlock })), { archive: true });
-  if (sLegs.some((x) => x === 0n)) fail('pair-too-new');
+  for (let i = 0; i < sLegs.length; i++) if (sLegs[i] === 0n) sLegs[i] = await legAt(route.legs[i], startBlock, end);
   const startTime = await blockTime(startBlock);
 
   const coinInPair = { start: curvePrice(sCurve, decCoin, decQuote), end: curvePrice(eCurve, decCoin, decQuote) };
@@ -215,7 +292,7 @@ async function diagnose(coin, found) {
   if (code == null) {
     try { code = await getCode(coin); } catch (e) { fail('rpc-failed', { detail: 'getCode' }); }
   }
-  if (!found.available && code !== '0x') fail('rpc-failed', { detail: 'pool search unavailable' });
+  if (!found.available && code !== '0x') fail('search-failed', { detail: 'pool search unavailable' });
   if (code && code !== '0x') {
     const facts = await tokenFacts([coin]);
     fail(facts.get(coin).decimals == null ? 'not-a-token' : 'no-pool');
@@ -226,36 +303,54 @@ async function diagnose(coin, found) {
 
 async function lookup(address, window, opts) {
   const progress = (t) => { try { if (opts.onProgress) opts.onProgress(t); } catch (e) { /* ignore */ } };
+  const step = () => {
+    let gone = false;
+    try { gone = typeof opts.cancelled === 'function' && !!opts.cancelled(); } catch (e) { /* ignore */ }
+    if (gone) fail('rpc-failed', { detail: 'cancelled' });
+  };
   const coin = normalizeAddress(address);
   if (!coin) fail('bad-address');
   const win = K.WINDOW_SECONDS[window] ? window : (K.WINDOW_SECONDS[SETTINGS.defaultWindow] ? SETTINGS.defaultWindow : '24h');
   const secs = K.WINDOW_SECONDS[win];
   const pinned = opts.endBlock != null;
 
-  const stocks = await loadStocks();
-  const own = classifyAddress(coin, stocks);
-  if (own.kind !== 'coin') fail('is-pair-asset', { symbol: own.symbol });
+  // Dollar coins, ETH and (once stocks.js has loaded) stock tokens are known without asking anyone.
+  const quick = classifyAddress(coin, stocksNow);
+  if (quick.kind !== 'coin') fail('is-pair-asset', { symbol: quick.symbol });
 
   progress('Finding the pool…');
-  const endP = getEnd(opts.endBlock);
-  const startP = endP.then((end) => blockAtTime(end.time - secs, { number: end.block, time: end.time }));   // runs while the pool search runs
-  endP.catch(() => {}); startP.catch(() => {});
-
-  // A Pons coin still on its launch curve has no pool yet: its price lives on the curve.
-  const curveP = detectCurve(coin).catch(() => null);
+  // The chain's head and the Pons check start straight away, while stocks.js loads.
+  const span = windowSpan(getEnd(opts.endBlock), secs, pinned);
+  // A Pons coin still on its launch curve has no pool yet: its price lives on the curve. A failed check is kept
+  // as a failure (never read as "not a Pons coin").
+  const curveP = detectCurve(coin).then((v) => ({ v }), (err) => ({ err }));
+  const stocks = await loadStocks();
+  step();
+  const own = classifyAddress(coin, stocks);
+  if (own.kind !== 'coin') fail('is-pair-asset', { symbol: own.symbol });
   const poolsP = poolsFor(coin, stocks);
   poolsP.catch(() => {});
-  const curve = await curveP;
-  if (curve && !curve.graduated) return curveLookup({ coin, curve, win, secs, endP, startP, stocks, pinned, progress });
+  const cr = await curveP;
+  step();
+  if (cr.v && !cr.v.graduated) return curveLookup({ coin, curve: cr.v, win, secs, span, stocks, pinned, progress, step });
 
   const found = await poolsP;
+  step();
+  if (!found.ranked.length) {
+    // Nothing readable listed: don't keep that answer (a pool created a minute ago gets listed soon). If the Pons
+    // check failed, or the coin just left its curve (its new pool isn't listed yet), the answer may be one try
+    // away: never call it a coin we can't read.
+    forgetPools(coin, poolsP);
+    if (cr.err) fail('rpc-failed', { detail: 'curve check failed' });
+    if (cr.v && cr.v.graduated) fail(found.available ? 'rpc-failed' : 'search-failed', { detail: 'new pool not listed yet' });
+  }
   if (!found.cands.length) await diagnose(coin, found);
   let ranked = found.ranked;
   if (opts.poolId) ranked = found.cands.filter((c) => c.id === String(opts.poolId).toLowerCase() && c.readable);
   if (!ranked.length) fail('unsupported-pool', { detail: 'no readable pool' });
 
-  const end = await endP;
-  if (!pinned && Date.now() / 1000 - end.time > SETTINGS.limits.staleSeconds) fail('stale');
+  const end = await span.end();
+  step();
   progress('Reading prices…');
 
   // Main pool: the deepest readable one whose price answers at the end block and whose pair we can
@@ -294,42 +389,53 @@ async function lookup(address, window, opts) {
   }
   if (!chosen) throw firstErr || new DataError('unsupported-pool', { detail: 'main pool unreadable' });
   const { cand, pair, coinLeg, route, legs } = chosen;
+  const routeLegs = legs.slice(1);
+  step();
 
-  // Start of the window (or the pool's first block when it is younger than the window).
+  // Start of the window (or a later block when the pool is younger than the window).
   const startTarget = end.time - secs;
-  let startBlock = await startP;
-  let sinceLaunch = false;
+  const windowStart = await span.start();
+  let startBlock = windowStart, sinceLaunch = false, created = null, onCurve = null, s = null;
   const hint = cand.createdAt ? end.block - Math.round((end.time - cand.createdAt) / K.BLOCK_SECONDS) : null;
-  let created = null;
-  if (cand.createdAt && cand.createdAt > startTarget - 3600) {
-    created = await findInitialize(coinLeg, { maxBlock: end.block, hintBlock: hint });
-    if (created && created.block > startBlock) { startBlock = created.block; sinceLaunch = true; }
-  }
-  let s = await readSqrtMany(legs.map((pool) => ({ pool, block: startBlock })), { archive: true });
-  if (s[0] === 0n && !sinceLaunch) {
-    created = created || await findInitialize(coinLeg, { maxBlock: end.block, hintBlock: hint });
-    if (!created) fail('rpc-failed', { detail: 'pool start not found' });
-    if (created.block > startBlock) {
-      startBlock = created.block; sinceLaunch = true;
-      s = await readSqrtMany(legs.map((pool) => ({ pool, block: startBlock })), { archive: true });
-    } else if (coinLeg.uniswap) {
-      s[0] = await sqrtFromLogs(coinLeg, startBlock);          // the archive said "no pool" but it existed
+  const poolBirth = async () => {
+    if (!created) created = await findInitialize(coinLeg, { maxBlock: end.block, hintBlock: hint });
+    if (created) coinLeg.createdBlock = created.block;          // the trade-log search stops at the pool's birth
+    return created;
+  };
+  if (cand.createdAt && cand.createdAt > startTarget - 3600) await poolBirth();
+  if (!(created && created.block > windowStart)) {
+    s = await readSqrtMany(legs.map((pool) => ({ pool, block: windowStart })), { archive: true });
+    if (s[0] === 0n) {                                          // the archive says "no pool" at the start
+      if (!(await poolBirth())) fail('rpc-failed', { detail: 'pool start not found' });
+      if (created.block <= windowStart && coinLeg.uniswap) s[0] = await sqrtFromLogs(coinLeg, windowStart);   // it was wrong
     }
   }
-  if (s[0] === 0n) fail('rpc-failed', { detail: 'no start price' });
-  for (let i = 1; i < legs.length; i++) {
-    if (s[i] !== 0n) continue;
-    const legHint = legs[i].createdAt ? end.block - Math.round((end.time - legs[i].createdAt) / K.BLOCK_SECONDS) : null;
-    const init = await findInitialize(legs[i], { maxBlock: end.block, hintBlock: legHint });
-    if (!init || init.block > startBlock) fail('pair-too-new');
-    if (legs[i].uniswap) s[i] = await sqrtFromLogs(legs[i], startBlock);
-    if (s[i] === 0n) fail('pair-too-new');
+  if (created && created.block > windowStart) {                // the pool is younger than the window
+    // A Pons coin traded on its launch curve before this pool: the window starts on the curve, at the window's
+    // own start, or at the curve's birth when the coin itself is younger than the window (a real launch).
+    // Otherwise the window starts at the pool's first block (since launch).
+    let ponsCurve = cr.v;
+    if (cr.err) ponsCurve = await detectCurve(coin).catch(() => fail('rpc-failed', { detail: 'curve check failed' }));
+    if (ponsCurve && ponsCurve.graduated && ponsCurve.pairToken === pair.address) {
+      onCurve = await curveStart(ponsCurve.curve, windowStart, end.block);
+      onCurve.curve = ponsCurve.curve;
+      startBlock = onCurve.block; sinceLaunch = onCurve.sinceLaunch;
+      s = [0n, ...(await readSqrtMany(routeLegs.map((pool) => ({ pool, block: startBlock })), { archive: true }))];
+    } else {
+      startBlock = created.block; sinceLaunch = true;
+      s = await readSqrtMany(legs.map((pool) => ({ pool, block: startBlock })), { archive: true });
+    }
   }
+  if (!onCurve && s[0] === 0n) fail('rpc-failed', { detail: 'no start price' });
+  for (let i = 1; i < legs.length; i++) if (s[i] === 0n) s[i] = await legAt(legs[i], startBlock, end);
   const startTime = await blockTime(startBlock);
 
   const e = chosen.endSqrt;
-  const coinInPair = { start: priceOf(coin, coinLeg, s[0]), end: priceOf(coin, coinLeg, e[0]) };
-  const routeLegs = legs.slice(1);
+  const [decCoin, decPair] = coin === coinLeg.token0 ? [coinLeg.dec0, coinLeg.dec1] : [coinLeg.dec1, coinLeg.dec0];
+  const coinInPair = {
+    start: onCurve ? curvePrice(onCurve.reserves, decCoin, decPair) : priceOf(coin, coinLeg, s[0]),
+    end: priceOf(coin, coinLeg, e[0]),
+  };
   const pairUsd = routeLegs.length
     ? { start: routePrice(routeLegs, s.slice(1)), end: routePrice(routeLegs, e.slice(1)) }
     : null;
@@ -349,7 +455,8 @@ async function lookup(address, window, opts) {
       id: cand.id, dex: cand.dex, label: coinSymbol + '/' + pair.symbol,
       pairSideUsd: Number.isFinite(pairSideUsd) ? pairSideUsd : null,
       createdAt: sinceLaunch ? startTime : cand.createdAt,     // since launch: the chain's own creation time
-      source: cand.source,
+      // 'pons-curve-then-pool': the start price is on the coin's Pons launch curve, the end price in this pool.
+      source: onCurve ? 'pons-curve-then-pool' : cand.source,
     },
     window: win,
     windowSeconds: secs,
@@ -359,8 +466,10 @@ async function lookup(address, window, opts) {
     coinInPair,
     pairUsd,
     pairVia: route.via,
-    tradedInWindow: s[0] !== e[0],
-  }, { type: 'pool', coin, coinLeg, routeLegs });
+    tradedInWindow: onCurve ? coinInPair.start !== coinInPair.end : s[0] !== e[0],
+  }, onCurve
+    ? { type: 'pool', coin, coinLeg, routeLegs, curve: onCurve.curve, poolBlock: created.block, decCoin, decQuote: decPair }
+    : { type: 'pool', coin, coinLeg, routeLegs });
 }
 
 // ---- Off-hours mode (settings.features.offHoursMode) -------------------------------------------
@@ -451,17 +560,24 @@ function sharedTimes() {
 }
 
 // [{ coinInPair, pairUsd }] at each block, from the remembered legs (archive node; pools fall back to swap logs).
+// The coin is priced on its Pons curve at every block for a curve coin, and before its pool's first block for a
+// coin measured on its curve, then its pool.
 async function pricesAt(route, blocks) {
-  const legs = route.type === 'pool' ? [route.coinLeg, ...route.routeLegs] : route.routeLegs;
-  const n = legs.length;
+  const onCurve = (b) => route.type === 'curve' || (route.curve != null && b < route.poolBlock);
+  const items = [];
+  for (const block of blocks) {
+    if (!onCurve(block)) items.push({ pool: route.coinLeg, block });
+    for (const pool of route.routeLegs) items.push({ pool, block });
+  }
+  const curveBlocks = blocks.filter(onCurve);
   const [sqrts, curves] = await Promise.all([
-    n ? sqrtsAt(blocks.flatMap((block) => legs.map((pool) => ({ pool, block })))) : [],
-    route.type === 'curve' ? curvesAt(route.curve, blocks) : null,
+    items.length ? sqrtsAt(items) : [],
+    curveBlocks.length ? curvesAt(route.curve, curveBlocks) : [],
   ]);
-  return blocks.map((block, i) => {
-    const s = sqrts.slice(i * n, (i + 1) * n);
-    const coinInPair = route.type === 'pool' ? priceOf(route.coin, route.coinLeg, s[0]) : curvePrice(curves[i], route.decCoin, route.decQuote);
-    const pairS = route.type === 'pool' ? s.slice(1) : s;
+  let k = 0, c = 0;
+  return blocks.map((block) => {
+    const coinInPair = onCurve(block) ? curvePrice(curves[c++], route.decCoin, route.decQuote) : priceOf(route.coin, route.coinLeg, sqrts[k++]);
+    const pairS = route.routeLegs.map(() => sqrts[k++]);
     return { coinInPair, pairUsd: route.routeLegs.length ? routePrice(route.routeLegs, pairS) : null };
   });
 }
@@ -515,7 +631,7 @@ async function fromTradeLogs(items, idx, out) {
           ? { address: K.POOL_MANAGER, topics: [K.TOPIC_V4_SWAP, pool.id] }
           : { address: pool.id, topics: [K.TOPIC_V3_SWAP] };
         return { method: 'eth_getLogs', params: [{ ...f, fromBlock: toHex(Math.max(0, block - far + 1)), toBlock: toHex(Math.max(0, block - near)) }] };
-      }), { tries: 3 });
+      }), logOpts(3));
     } catch (e) { break; }
     const next = [];
     idx.forEach((i, j) => {
