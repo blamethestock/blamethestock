@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Font check — Blame the Stock</title>
+  <!-- Dev-only preview (not uploaded). Shows the headline in both candidate fonts.
+       Works from the local preview server (http://localhost:8765/dev/previews/fonts.html)
+       and also when opened straight from Finder (needs internet for the fonts). -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=Roboto+Flex:opsz,wdth,wght@8..144,25..151,100..1000&display=swap">
+  <!-- The real site stylesheet: the headline width/weight/spacing per font come from here. -->
+  <link rel="stylesheet" href="../../site/styles.css">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+      background: #000;
+      color: #fff;
+      margin: 0;
+    }
+    .page { width: min(100% - 32px, 1600px); margin: 0 auto; padding: 40px 0 80px; }
+    .intro h1 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.01em; }
+    .intro p { margin: 10px 0 0; max-width: 70ch; color: #8b8b8b; font-size: 15px; line-height: 1.55; }
+    .intro code { color: #fff; background: #151515; border: 1px solid #262626; border-radius: 6px; padding: 1px 6px; }
+    h2.row-title { margin: 48px 0 14px; color: #8b8b8b; font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; }
+    .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; }
+    .row.phones { grid-template-columns: repeat(2, minmax(0, 420px)); justify-content: center; gap: 48px; }
+    figure { margin: 0; }
+    figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; font-size: 15px; font-weight: 600; }
+    figcaption small { color: #8b8b8b; font-weight: 400; font-size: 13px; }
+    .badge { margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: #fff; color: #000; font-size: 11px; font-weight: 700; vertical-align: 2px; }
+    @media (max-width: 900px) {
+      .row, .row.phones { grid-template-columns: minmax(0, 1fr); }
+    }
+
+    /* a screen, drawn at its real pixel size and then shrunk to fit the column */
+    .scaler { position: relative; width: 100%; overflow: hidden; border: 1px solid #262626; border-radius: 14px; background: #000; }
+    .pv-frame {
+      position: absolute; left: 0; top: 0;
+      width: var(--w); height: var(--h);
+      transform-origin: 0 0;
+      background: #000; color: #fff;
+      font-family: var(--pv-font);
+      font-stretch: 100%;
+      overflow: hidden;
+      text-align: center;
+    }
+    .pv-frame[data-font="archivo"]    { --pv-font: 'Archivo', 'Arial Narrow', sans-serif; }
+    .pv-frame[data-font="robotoflex"] { --pv-font: 'Roboto Flex', 'Arial Narrow', sans-serif; }
+
+    /* mirrors the real page at that screen size */
+    .pv-menu {
+      position: absolute; left: 0; right: 0; top: 16px; margin: 0 auto;
+      width: min(calc(100% - 64px), 760px); height: 54px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 6px 0 20px;
+      border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: rgba(0,0,0,.62);
+    }
+    .pv-wordmark, .pv-headline {
+      font-weight: var(--head-wght); font-stretch: var(--head-wdth); letter-spacing: var(--head-track); word-spacing: var(--head-word); text-transform: uppercase;
+    }
+    .pv-wordmark { font-size: 21px; line-height: 1; letter-spacing: -0.005em; }
+    .pv-pill { display: inline-flex; align-items: center; height: 42px; padding: 0 16px; border-radius: 999px; background: #fff; color: #000; font-size: 14px; font-weight: 650; }
+    .pv-hero { padding: calc(16px + 54px + clamp(28px, calc(var(--h) * .045), 72px)) 32px 0; }
+    .pv-headline { margin: 0; line-height: var(--head-lh); font-size: 200px; }
+    .pv-line { display: block; }
+    .pv-line > span { display: inline-block; white-space: nowrap; }
+    .pv-paste {
+      width: min(100%, 680px); margin: clamp(24px, calc(var(--h) * .04), 48px) auto 0;
+      display: flex; align-items: center; gap: 8px; padding: 6px;
+      border: 1px solid #3a3a3a; border-radius: 999px; background: #0a0a0a;
+    }
+    .pv-ph { flex: 1; text-align: left; padding-left: 20px; color: #8b8b8b; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pv-btn { display: inline-flex; align-items: center; justify-content: center; height: 52px; padding: 0 30px; border-radius: 999px; background: #fff; color: #000; font-size: 17px; font-weight: 650; }
+    .pv-examples { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 16px; color: #8b8b8b; font-size: 14px; }
+    .pv-examples span { padding: 9px 15px; border: 1px solid #3a3a3a; border-radius: 999px; color: #fff; font-weight: 600; line-height: 1; }
+    .pv-note { margin: 18px 0 0; color: #8b8b8b; font-size: 14px; }
+
+    /* phone screen: same rules the site uses under 600px */
+    .is-phone .pv-menu { top: 12px; width: calc(100% - 32px); }
+    .is-phone .pv-wordmark { font-size: 21px; }
+    .is-phone .pv-pill { font-size: 14px; padding: 0 16px; }
+    .is-phone .pv-hero { padding-left: 16px; padding-right: 16px; padding-top: calc(12px + 54px + 28px); }
+    .is-phone .pv-paste { flex-direction: column; align-items: stretch; border-radius: 22px; gap: 6px; }
+    .is-phone .pv-ph { height: 50px; display: flex; align-items: center; padding: 0 14px; font-size: 15px; }
+    .is-phone .pv-btn { height: 50px; border-radius: 16px; font-size: 17px; }
+
+    .specimen { padding: 28px; border: 1px solid #262626; border-radius: 14px; }
+    .specimen .big { font-family: var(--pv-font); font-weight: var(--head-wght); font-stretch: var(--head-wdth); letter-spacing: var(--head-track); word-spacing: var(--head-word); text-transform: uppercase; font-size: clamp(56px, 7vw, 120px); line-height: .85; }
+    .specimen .body { margin: 18px 0 0; font-family: var(--pv-font); font-size: 18px; line-height: 1.5; color: #d0d0d0; }
+    .specimen .nums { margin-top: 10px; font-family: var(--pv-font); font-weight: var(--head-wght); font-stretch: var(--head-wdth); letter-spacing: var(--head-track); font-size: 64px; line-height: 1; }
+    .specimen .nums .c { color: #FF4F1F; } .specimen .nums .p { color: #2433FF; }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="intro">
+      <h1>Pick the font</h1>
+      <p>Left: <strong>Archivo</strong>. Right: <strong>Roboto Flex</strong>. Both are free Google Fonts. The headline fills 90% of the screen width on each, just like the live page.</p>
+      <p>To choose, open <code>site/settings.js</code> and set <code>font: "archivo"</code> or <code>font: "robotoflex"</code>. The page only downloads the one you pick.</p>
+    </header>
+
+    <h2 class="row-title">Desktop — a 1440 × 900 screen, shrunk to fit</h2>
+    <div class="row" id="desktop-row"></div>
+
+    <h2 class="row-title">Phone — a 375 × 812 screen</h2>
+    <div class="row phones" id="phone-row"></div>
+
+    <h2 class="row-title">Close up</h2>
+    <div class="row" id="specimen-row"></div>
+  </main>
+
+  <script>
+    (function () {
+      var FONTS = [
+        { key: 'archivo', name: 'Archivo', note: 'width 62 · weight 900' },
+        { key: 'robotoflex', name: 'Roboto Flex', note: 'width 40 · weight 850' }
+      ];
+      var state = { line1: "IT WASN'T", line2: 'YOUR COIN', current: 'archivo' };
+
+      function esc(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      function frameHtml(font, w, h, phone) {
+        return '' +
+          '<figure>' +
+            '<figcaption><span>' + font.name + (state.current === font.key ? '<span class="badge">IN USE</span>' : '') + '</span>' +
+            '<small>' + font.note + '</small></figcaption>' +
+            '<div class="scaler" style="aspect-ratio:' + w + ' / ' + h + '">' +
+              '<div class="pv-frame' + (phone ? ' is-phone' : '') + '" data-font="' + font.key + '" style="--w:' + w + 'px;--h:' + h + 'px">' +
+                '<div class="pv-menu"><span class="pv-wordmark">Blame the Stock</span><span class="pv-pill">Paste a coin</span></div>' +
+                '<div class="pv-hero">' +
+                  '<div class="pv-headline">' +
+                    '<span class="pv-line"><span>' + esc(state.line1) + '</span></span>' +
+                    '<span class="pv-line"><span>' + esc(state.line2) + '</span></span>' +
+                  '</div>' +
+                  '<div class="pv-paste"><span class="pv-ph">Paste a Robinhood Chain coin address (0x…)</span><span class="pv-btn">Blame</span></div>' +
+                  '<div class="pv-examples">Try <span>AI</span><span>ZOLVA</span><span>SHRP</span></div>' +
+                  '<p class="pv-note">Free. No wallet. No sign-up.</p>' +
+                '</div>' +
+              '</div>' +
+            '</div>' +
+          '</figure>';
+      }
+
+      function specimenHtml(font) {
+        return '<figure><figcaption><span>' + font.name + '</span><small>' + font.note + '</small></figcaption>' +
+          '<div class="specimen" data-font="' + font.key + '" style="--pv-font:\'' + font.name + '\', \'Arial Narrow\', sans-serif">' +
+            '<div class="big">' + esc(state.line1) + '<br>' + esc(state.line2) + '</div>' +
+            '<div class="nums"><span class="c">−12%</span> &nbsp;<span class="p">−5%</span> &nbsp;$BLAME</div>' +
+            '<p class="body">You\'re down 12%. About 40% of that is the stock (NVDA). On its own, your coin was down 7.4% against NVDA.</p>' +
+          '</div></figure>';
+      }
+
+      // Same rule as the site: the wider line is 90% of the screen width, but never so big that the
+      // paste box falls off the bottom of the screen. offsetWidth ignores the shrink-to-fit transform.
+      function fit(frame) {
+        var box = frame.querySelector('.pv-headline');
+        var lines = frame.querySelectorAll('.pv-line > span');
+        var w = parseFloat(frame.style.getPropertyValue('--w'));
+        var h = parseFloat(frame.style.getPropertyValue('--h'));
+        var lh = parseFloat(getComputedStyle(frame).getPropertyValue('--head-lh')) || 0.83;
+        var paste = frame.querySelector('.pv-paste');
+        var below = parseFloat(getComputedStyle(paste).marginTop) + paste.offsetHeight + 24;
+        var cap = Math.max(48, (h - box.offsetTop - below) / (lines.length * lh));
+        var size = 200;
+        for (var pass = 0; pass < 2; pass++) { // second pass: optical sizes change the letter widths
+          box.style.fontSize = size.toFixed(2) + 'px';
+          var widest = 0;
+          for (var i = 0; i < lines.length; i++) widest = Math.max(widest, lines[i].offsetWidth);
+          if (!widest) return;
+          size = Math.min(size * (w * 0.9) / widest, cap);
+        }
+        box.style.fontSize = size.toFixed(2) + 'px';
+      }
+
+      function scaleAll() {
+        var frames = document.querySelectorAll('.pv-frame');
+        for (var i = 0; i < frames.length; i++) {
+          var f = frames[i];
+          var s = f.parentElement.clientWidth / parseFloat(f.style.getPropertyValue('--w'));
+          f.style.transform = 'scale(' + Math.min(1, s) + ')';
+        }
+      }
+
+      function render() {
+        document.getElementById('desktop-row').innerHTML = FONTS.map(function (f) { return frameHtml(f, 1440, 900, false); }).join('');
+        document.getElementById('phone-row').innerHTML = FONTS.map(function (f) { return frameHtml(f, 375, 812, true); }).join('');
+        document.getElementById('specimen-row').innerHTML = FONTS.map(specimenHtml).join('');
+        refresh();
+      }
+
+      function refresh() {
+        var frames = document.querySelectorAll('.pv-frame');
+        for (var i = 0; i < frames.length; i++) fit(frames[i]);
+        scaleAll();
+      }
+
+      render();
+      window.addEventListener('resize', scaleAll);
+      if (document.fonts) {
+        Promise.all([
+          document.fonts.load('900 100px "Archivo"'),
+          document.fonts.load('900 100px "Roboto Flex"'),
+          document.fonts.load('400 16px "Archivo"'),
+          document.fonts.load('400 16px "Roboto Flex"')
+        ]).then(refresh, refresh);
+        document.fonts.addEventListener && document.fonts.addEventListener('loadingdone', refresh);
+      }
+
+      // Use the real headline from settings.js when the page is served (opening the file directly can't read it).
+      import('../../site/settings.js').then(function (m) {
+        var s = m.SETTINGS || {};
+        if (s.headline && s.headline.line1) state.line1 = s.headline.line1;
+        if (s.headline && s.headline.line2) state.line2 = s.headline.line2;
+        if (s.font) state.current = String(s.font).toLowerCase();
+        render();
+      }).catch(function () { /* keep the defaults */ });
+    })();
+  </script>
+</body>
+</html>

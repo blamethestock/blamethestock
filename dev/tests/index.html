@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tests</title>
+<style>
+  :root { --bg: #000; --fg: #fff; --grey: #8b8b8b; --line: #262626; --coin: #FF4F1F; }
+  body { margin: 0; padding: 24px 16px 64px; background: var(--bg); color: var(--fg);
+         font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  h1 { font: 600 18px/1.2 system-ui, sans-serif; margin: 0 0 4px; }
+  p { color: var(--grey); margin: 0 0 16px; }
+  #total { font-size: 18px; padding: 12px 0; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+  #total.fail::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+                        background: var(--coin); margin-right: 8px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { padding: 2px 0; color: var(--grey); overflow-wrap: anywhere; }
+  li.fail { color: var(--fg); font-weight: 700; }
+</style>
+</head>
+<body>
+<h1>Blame the Stock — tests</h1>
+<p>Same tests as dev/run-tests.sh. &#10003; passed, &#10007; failed.</p>
+<div id="total">Loading&hellip;</div>
+<ul id="results"></ul>
+<script type="module">
+  // A dynamic import so a missing or broken test file is shown here instead of failing silently.
+  import('./run.js').catch((e) => {
+    const t = document.getElementById('total');
+    t.textContent = 'Could not load the tests: ' + (e && e.message ? e.message : e);
+    t.className = 'fail';
+  });
+</script>
+</body>
+</html>

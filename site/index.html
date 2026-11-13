@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Blame the Stock</title>
+
+  <!--
+    The tags below mirror settings.js (site.name, site.url, site.description).
+    X and other link previews cannot run JavaScript, so they are written here by hand.
+    If you change those settings, change the same words here too.
+  -->
+  <meta name="description" content="Paste a Robinhood Chain coin. See how much of its move came from what it's paired with.">
+  <link rel="canonical" href="https://blamethestock.xyz/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Blame the Stock">
+  <meta property="og:title" content="Blame the Stock">
+  <meta property="og:description" content="Paste a Robinhood Chain coin. See how much of its move came from what it's paired with.">
+  <meta property="og:url" content="https://blamethestock.xyz/">
+  <meta property="og:image" content="https://blamethestock.xyz/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Blame the Stock: how much of your coin's move came from what it's paired with.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Blame the Stock">
+  <meta name="twitter:description" content="Paste a Robinhood Chain coin. See how much of its move came from what it's paired with.">
+  <meta name="twitter:image" content="https://blamethestock.xyz/assets/og.png">
+
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/icon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="assets/icon-180.png">
+  <meta name="theme-color" content="#000000">
+  <meta name="color-scheme" content="dark">
+
+  <!-- The font itself is picked in settings.js and loaded by src/ui/page.js. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="src/ui/card.css">
+
+  <script>
+    // Tiny early switch: lets the page hide things that animate in, before they flash.
+    // If the page script never starts (very old browser, blocked file), show everything after 4 s.
+    (function () {
+      var d = document.documentElement;
+      d.classList.add('js');
+      try {
+        if (!window.matchMedia || !matchMedia('(prefers-reduced-motion: reduce)').matches) d.classList.add('motion');
+      } catch (e) {}
+      setTimeout(function () {
+        if (!d.classList.contains('page-ok')) d.classList.remove('js', 'motion');
+      }, 4000);
+    })();
+  </script>
+  <!-- Fetch page.js's own imports at the same time as page.js, so the headline is filled sooner. -->
+  <link rel="modulepreload" href="settings.js">
+  <link rel="modulepreload" href="src/ui/motion.js">
+  <script type="module" src="src/ui/page.js"></script>
+  <script type="module" src="src/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#paste-form">Skip to the paste box</a>
+
+  <!-- 1. Floating pill menu -->
+  <header class="menu" id="menu">
+    <a class="wordmark" id="menu-wordmark" href="#top" aria-label="Back to top"></a>
+    <nav class="menu-links" aria-label="Main">
+      <a class="menu-x" id="menu-x" href="#" target="_blank" rel="noopener noreferrer" hidden>X</a>
+      <button class="btn btn-white btn-small" type="button" data-action="paste-a-coin">Paste a coin</button>
+    </nav>
+  </header>
+
+  <main id="top">
+    <!-- 2. Hero: headline + the tool -->
+    <section class="hero" id="hero" aria-label="Blame the Stock">
+      <div class="sticker-layer" aria-hidden="true"></div>
+      <h1 class="headline" id="headline"></h1>
+
+      <div class="hero-tool" id="hero-tool">
+        <form class="paste" id="paste-form" action="./" method="get" role="search" autocomplete="off">
+          <label class="visually-hidden" for="ca-input">Coin address</label>
+          <input id="ca-input" name="ca" type="text" inputmode="text"
+                 placeholder="Paste a Robinhood Chain coin address (0x…)"
+                 autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="120">
+          <button class="btn btn-white" id="paste-submit" type="submit">Blame</button>
+        </form>
+        <div class="examples" id="examples" aria-label="Example coins">
+          <span class="examples-label">Try</span>
+        </div>
+        <p class="hero-note">Free. No wallet. No sign-up.</p>
+      </div>
+    </section>
+
+    <!-- 3. Result card (filled by src/app.js + src/ui/card.js) -->
+    <section id="result" aria-live="polite"></section>
+
+    <!-- 4. How it works: three scroll stops -->
+    <section class="section how" id="how" aria-labelledby="how-title">
+      <div class="section-head" data-reveal>
+        <h2 class="section-label" id="how-title"><span>How it works</span></h2>
+      </div>
+
+      <div class="how-track">
+        <div class="how-pin">
+          <div class="how-progress" aria-hidden="true"><span></span><span></span><span></span></div>
+          <ol class="how-steps">
+            <li class="how-step is-active">
+              <div class="how-copy">
+                <p class="how-count">1 / 3</p>
+                <h3 class="how-title">Your coin moved.</h3>
+                <p class="how-text">Say it's down 12% over the last day. That's the number your wallet shows you.</p>
+              </div>
+              <div class="how-visual" aria-hidden="true">
+                <div class="viz-row">
+                  <span class="viz-label"><i class="viz-key viz-key-coin"></i>Your coin</span>
+                  <span class="viz-chip">24h</span>
+                </div>
+                <div class="viz-big">−12%</div>
+                <div class="viz-foot"><span class="viz-arrow">↓</span> down 12%</div>
+              </div>
+            </li>
+            <li class="how-step">
+              <div class="how-copy">
+                <p class="how-count">2 / 3</p>
+                <h3 class="how-title">So did what it's paired with.</h3>
+                <p class="how-text">Most coins trade against something else: a stock token like NVDA, Ethereum, or another coin. If that fell 5%, it dragged your coin down with it.</p>
+              </div>
+              <div class="how-visual" aria-hidden="true">
+                <div class="viz-row viz-dim">
+                  <span class="viz-label"><i class="viz-key viz-key-coin"></i>Your coin</span>
+                  <span class="viz-small">−12%</span>
+                </div>
+                <div class="viz-row">
+                  <span class="viz-label"><i class="viz-key viz-key-pair"></i>Paired with</span>
+                  <span class="viz-chip">NVDA</span>
+                </div>
+                <div class="viz-big">−5%</div>
+                <div class="viz-foot"><span class="viz-arrow">↓</span> down 5% in the same hours</div>
+              </div>
+            </li>
+            <li class="how-step">
+              <div class="how-copy">
+                <p class="how-count">3 / 3</p>
+                <h3 class="how-title">Here's the split.</h3>
+                <p class="how-text">We read both prices straight from Robinhood Chain, for the same start and end time, and split your move in two: the part that came from the pair, and the part that's the coin's own.</p>
+              </div>
+              <div class="how-visual" aria-hidden="true">
+                <p class="viz-verdict">You're down 12%. About 40% of that is the stock (NVDA).</p>
+                <div class="viz-bar">
+                  <span class="viz-seg viz-seg-pair" style="flex-grow:40"></span>
+                  <span class="viz-seg viz-seg-coin" style="flex-grow:60"></span>
+                </div>
+                <div class="viz-legend">
+                  <span><i class="viz-key viz-key-pair"></i>40% the stock (NVDA)</span>
+                  <span><i class="viz-key viz-key-coin"></i>60% the coin itself</span>
+                </div>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. One giant sliding line -->
+    <section class="marquee" id="marquee" aria-hidden="true">
+      <div class="marquee-line" id="marquee-line"></div>
+    </section>
+
+    <!-- 6. Token -->
+    <section class="section token" id="token" aria-labelledby="token-title">
+      <div class="section-head" data-reveal>
+        <h2 class="section-label" id="token-title"><span>The coin</span></h2>
+      </div>
+      <div class="token-grid" data-reveal>
+        <p class="token-ticker" data-fit="1" data-fit-max="220"><span class="fit-text" id="token-ticker"></span></p>
+        <div class="token-card">
+          <div id="token-body"></div>
+          <p class="token-free" id="token-free"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. Update log -->
+    <section class="section updates" id="updates" aria-labelledby="updates-title">
+      <div class="section-head" data-reveal>
+        <h2 class="section-label" id="updates-title"><span>Update log</span></h2>
+      </div>
+      <ol class="updates-list" id="updates-list" data-reveal></ol>
+    </section>
+  </main>
+
+  <!-- 8. Footer -->
+  <footer class="footer" id="site-footer">
+    <p class="footer-mark" aria-hidden="true" data-fit="0.995"><span class="fit-text" id="footer-mark"></span></p>
+    <ul class="footer-notes">
+      <li>Not affiliated with Robinhood, Pons or any company named on this site.</li>
+      <li>Not financial advice.</li>
+      <li>Prices can be delayed or wrong.</li>
+      <li>Prices read directly from Robinhood Chain. Pool lists from DexScreener and GeckoTerminal.</li>
+    </ul>
+    <div class="footer-bottom">
+      <span id="footer-name"></span>
+      <a class="footer-x" id="footer-x" href="#" target="_blank" rel="noopener noreferrer" hidden>X</a>
+    </div>
+  </footer>
+
+  <noscript>
+    <p class="noscript">This site needs JavaScript to read prices from Robinhood Chain.</p>
+  </noscript>
+</body>
+</html>

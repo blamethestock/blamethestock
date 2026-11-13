@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stickers preview</title>
+<!-- Dev-only preview of site/src/ui/stickers.js. Open: http://localhost:8765/dev/previews/stickers.html -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=Roboto+Flex:opsz,wdth,wght@8..144,25..151,100..1000&display=swap">
+<style>
+  :root { --bg: #000; --fg: #fff; --grey: #8b8b8b; --line: #262626; --font: 'Archivo'; }
+  :root[data-font="robotoflex"] { --font: 'Roboto Flex'; }
+  :root[data-font="fallback"] { --font: 'No Such Font'; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px 64px; background: var(--bg); color: var(--fg);
+         font: 14px/1.5 var(--font), system-ui, sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 40px 0 4px; font-weight: 700; }
+  p, .label, .stats { color: var(--grey); }
+  p { margin: 0 0 16px; max-width: 60ch; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0 8px; }
+  .controls button { font: inherit; color: var(--fg); background: none; border: 1px solid var(--line);
+                     border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  .controls button[aria-pressed="true"] { border-color: var(--fg); }
+  .trail { position: relative; height: 340px; border: 1px solid var(--line); border-radius: 20px; overflow: hidden; }
+  .trail .head { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center;
+                 padding: 0 4%; font-weight: 900; font-stretch: 62%; font-size: min(15vw, 150px);
+                 line-height: .86; letter-spacing: -.02em; text-transform: uppercase; }
+  .trail .sticker { position: absolute; pointer-events: none; transform-origin: 50% 50%; }
+  .trail .sticker svg { display: block; }
+  .row { display: flex; flex-wrap: wrap; gap: 14px 18px; align-items: center; padding: 14px 0;
+         border-bottom: 1px solid var(--line); }
+  .label { width: 100%; font-size: 12px; }
+  .cell svg { display: block; max-width: 100%; height: auto; }
+  .stats { font-size: 12px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>Stickers</h1>
+<p>Every kind × palette × text from settings.js, drawn by site/src/ui/stickers.js, on black. The box at the top mimics the hero trail (randomSticker 0, 1, 2… with a small tilt).</p>
+<div class="controls" id="fonts">
+  <span class="label" style="width:auto">Font:</span>
+  <button data-font="archivo" aria-pressed="true">Archivo</button>
+  <button data-font="robotoflex" aria-pressed="false">Roboto Flex</button>
+  <button data-font="fallback" aria-pressed="false">Fallback (Arial Narrow)</button>
+  <button id="reseed">New trail</button>
+</div>
+<div class="trail" id="trail"><div class="head" id="head"></div></div>
+<div id="grid"></div>
+<div class="stats" id="stats"></div>
+
+<script type="module">
+  import { SETTINGS } from '../../site/settings.js';
+  import { STICKER_KINDS, PALETTE_NAMES, makeSticker, randomSticker, stickerTexts } from '../../site/src/ui/stickers.js';
+
+  const $ = (id) => document.getElementById(id);
+  let font = 'archivo', offset = 0;
+  for (const line of [SETTINGS.headline.line1, SETTINGS.headline.line2]) {
+    const d = document.createElement('div');
+    d.textContent = line;
+    $('head').appendChild(d);
+  }
+
+  function settingsFor() { return { ...SETTINGS, font: font === 'robotoflex' ? 'robotoflex' : 'archivo' }; }
+
+  function drawTrail() {
+    const box = $('trail');
+    box.querySelectorAll('.sticker').forEach((n) => n.remove());
+    const w = box.clientWidth, h = box.clientHeight, s = settingsFor();
+    for (let i = 0; i < 12; i++) {
+      const st = randomSticker(offset + i, s);
+      const t = i / 11;
+      const x = 0.04 * w + t * (w * 0.92 - st.width);
+      const y = h * (0.5 + 0.32 * Math.sin(t * Math.PI * 2.2)) - st.height / 2;
+      const rot = (((offset + i) * 37) % 17) - 8;
+      const el = document.createElement('div');
+      el.className = 'sticker';
+      el.style.cssText = `left:${x.toFixed(0)}px;top:${y.toFixed(0)}px;transform:rotate(${rot}deg)`;
+      el.innerHTML = st.svg;
+      box.appendChild(el);
+    }
+  }
+
+  function drawGrid() {
+    const s = settingsFor(), texts = stickerTexts(s);
+    let html = '', n = 0, maxBytes = 0, minW = 1e9, maxW = 0, minH = 1e9, maxH = 0;
+    for (const kind of STICKER_KINDS) {
+      html += `<h2>${kind}</h2>`;
+      for (const palette of PALETTE_NAMES) {
+        html += `<div class="row"><div class="label">${kind} · ${palette}</div>`;
+        texts.forEach((text, i) => {
+          const st = makeSticker({ kind, text, palette, seed: i, settings: s });
+          n++; maxBytes = Math.max(maxBytes, st.svg.length);
+          minW = Math.min(minW, st.width); maxW = Math.max(maxW, st.width);
+          minH = Math.min(minH, st.height); maxH = Math.max(maxH, st.height);
+          html += `<div class="cell" title="${st.width}×${st.height}, ${st.svg.length} bytes">${st.svg}</div>`;
+        });
+        html += '</div>';
+      }
+    }
+    $('grid').innerHTML = html;
+    $('stats').textContent = `${n} stickers · widths ${minW}–${maxW}px · heights ${minH}–${maxH}px · largest ${maxBytes} bytes`;
+  }
+
+  function draw() { drawTrail(); drawGrid(); }
+
+  $('fonts').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.id === 'reseed') { offset += 12; drawTrail(); return; }
+    font = b.dataset.font;
+    document.documentElement.dataset.font = font;
+    document.querySelectorAll('#fonts button[data-font]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    draw();
+  });
+  window.addEventListener('resize', drawTrail);
+  draw();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+</script>
+</body>
+</html>

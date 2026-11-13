@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card preview · Blame the Stock (dev)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link id="font-css" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<link rel="stylesheet" href="../../site/src/ui/card.css">
+<style>
+  :root {
+    --bg: #000; --fg: #fff; --grey: #8b8b8b; --line: #262626;
+    --pair: #2433FF; --coin: #FF4F1F; --radius: 20px;
+    --font: "Archivo", "Arial Narrow", Arial, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #000; color: #fff; font-family: var(--font); font-size: 16px; }
+  .bar {
+    position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+    padding: 12px 16px; background: rgba(0,0,0,.92); border-bottom: 1px solid #262626; font-size: 13px;
+  }
+  .bar h1 { margin: 0 12px 0 0; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+  .bar label { color: #8b8b8b; display: inline-flex; gap: 6px; align-items: center; }
+  .bar select, .bar button, .fake input, .row-head button {
+    font: inherit; color: #fff; background: #111; border: 1px solid #333; border-radius: 999px; padding: 6px 12px;
+  }
+  .bar button, .row-head button { cursor: pointer; }
+  .fake { display: flex; gap: 8px; padding: 16px; border-bottom: 1px solid #1a1a1a; }
+  .fake input { flex: 1; max-width: 560px; border-radius: 12px; padding: 10px 14px; }
+  .fake input:focus { outline: 2px solid #fff; outline-offset: 2px; }
+  main { padding: 8px 16px 120px; }
+  .row { padding: 28px 0; border-bottom: 1px solid #1a1a1a; }
+  .row-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; margin-bottom: 14px; }
+  .row-head h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+  .row-head p { margin: 0; color: #8b8b8b; font-size: 13px; }
+  .frames { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .frame { flex: none; max-width: 100%; }
+  .frame-desk { width: 920px; }
+  .frame-phone { width: 375px; padding: 0 16px; outline: 1px dashed #222; outline-offset: 0; }
+  .frame-cap { font-size: 11px; color: #555; margin: 0 0 6px; letter-spacing: .08em; text-transform: uppercase; }
+  body[data-layout="desktop"] .frame-phone { display: none; }
+  body[data-layout="phone"] .frame-desk { display: none; }
+  body[data-layout="phone"] .frame-phone { width: 100%; max-width: 375px; }
+  #share-out:empty { display: none; }
+  #share-out { padding: 16px; border-bottom: 1px solid #262626; display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 560px), 1fr)); }
+  #share-out figure { margin: 0; }
+  #share-out canvas { display: block; width: 100%; height: auto; border: 1px solid #333; border-radius: 8px; }
+  #share-out figcaption { font-size: 12px; color: #8b8b8b; margin-top: 6px; }
+  #share-out.single { grid-template-columns: 1fr; }
+  #share-out.single canvas { max-width: 1200px; }
+  .warn { margin: 16px; padding: 12px 16px; border: 1px solid #FF4F1F; border-radius: 12px; }
+</style>
+</head>
+<body data-layout="both">
+  <div class="bar">
+    <h1>Card preview</h1>
+    <label>Layout
+      <select id="layout">
+        <option value="both">Desktop + phone</option>
+        <option value="desktop">Desktop only</option>
+        <option value="phone">Phone only</option>
+      </select>
+    </label>
+    <label>Font
+      <select id="font">
+        <option value="archivo">Archivo</option>
+        <option value="robotoflex">Roboto Flex</option>
+      </select>
+    </label>
+    <label>Show
+      <select id="filter">
+        <option value="all">Everything</option>
+        <option value="result">Results</option>
+        <option value="extra">Edge cases</option>
+        <option value="error">Errors</option>
+        <option value="loading">Loading</option>
+      </select>
+    </label>
+    <button type="button" id="replay">Replay animations</button>
+    <button type="button" id="all-images">Render all share images</button>
+    <button type="button" id="clear-images">Clear images</button>
+  </div>
+
+  <!-- Stand-in for the hero paste box, so "Try another coin" has something to focus. -->
+  <form class="fake" id="paste-form" onsubmit="return false">
+    <label class="bts-sr" for="ca-input">Coin address</label>
+    <input id="ca-input" placeholder="Paste a Robinhood Chain coin address (0x…)" value="not an address">
+  </form>
+
+  <section id="share-out" aria-label="Share images"></section>
+  <main id="list"></main>
+
+<script type="module">
+import { SETTINGS } from '../../site/settings.js';
+import { renderResult, renderError, renderLoading } from '../../site/src/ui/card.js';
+import { renderShareImage, imageFileName } from '../../site/src/ui/share.js';
+
+const list = document.getElementById('list');
+const shareOut = document.getElementById('share-out');
+let core;
+try {
+  core = await import('../../site/src/core/verdict.js');
+} catch (e) {
+  list.insertAdjacentHTML('beforebegin', '<p class="warn">Could not load site/src/core/verdict.js, so no results can be built.</p>');
+}
+
+const FONT_CSS = {
+  archivo: 'https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap',
+  robotoflex: 'https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wdth,wght@8..144,25..151,100..1000&display=swap',
+};
+const FONT_NAME = { archivo: 'Archivo', robotoflex: 'Roboto Flex' };
+let settings = { ...SETTINGS };
+
+// ---- Hand-made inputs. Every result below comes from core buildResult(), so the wording is the real one.
+const END = Date.UTC(2026, 10, 13, 5, 37, 28) / 1000;
+const COINS = {
+  AI:    { address: '0x2e8c31162b855a2ffa90f6f8634643ad6f111e18', symbol: 'AI', name: 'AI' },
+  ZOLVA: { address: '0x8e04549484d0612be8373a0263b11928a5f7681f', symbol: 'ZOLVA', name: 'Zolva' },
+  SHRP:  { address: '0xb961886115fb9e4f732e20e89efd6d0406c3527f', symbol: 'SHRP', name: 'Sharp' },
+  ORBIO: { address: '0x1111111111111111111111111111111111111111', symbol: 'ORBIO', name: 'Orbio' },
+  LONG:  { address: '0x2222222222222222222222222222222222222222', symbol: 'SUPERCALIFRAGILISTICMEMECOIN', name: 'Long' },
+};
+const PAIRS = {
+  stock:  { address: '0x3333333333333333333333333333333333333333', symbol: 'NVDA', kind: 'stock' },
+  eth:    { address: '0x0000000000000000000000000000000000000000', symbol: 'ETH', kind: 'eth' },
+  coin:   { address: '0x1111111111111111111111111111111111111111', symbol: 'ORBIO', kind: 'coin' },
+  stable: { address: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', symbol: 'USDG', kind: 'stable' },
+};
+const COIN_FOR = { stock: COINS.AI, eth: COINS.ZOLVA, coin: COINS.SHRP, stable: COINS.ORBIO };
+
+function priceInput({ kind, c, q, window = '24h', coin, pair, liq = 48000, sinceLaunch = false, traded = true, ageS = 3 * 3600 }) {
+  const P = pair || PAIRS[kind];
+  const K = coin || COIN_FOR[kind];
+  const qq = kind === 'stable' ? 0 : q;
+  const r = (1 + c) / (1 + qq) - 1;
+  const secs = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800 }[window];
+  return {
+    ok: true,
+    coin: K, pair: P,
+    pool: { id: '0xpool', dex: 'uniswap-v4', label: `${K.symbol}/${P.symbol}`, pairSideUsd: liq,
+            createdAt: sinceLaunch ? END - ageS : END - 90 * 86400, source: 'dexscreener' },
+    window, windowSeconds: secs,
+    start: { block: 112293925, time: sinceLaunch ? END - ageS : END - secs },
+    end: { block: 113120530, time: END },
+    sinceLaunch,
+    coinInPair: { start: 1, end: traded ? 1 + r : 1 },
+    pairUsd: kind === 'stable' ? null : { start: 100, end: 100 * (1 + qq) },
+    pairVia: null,
+    tradedInWindow: traded,
+  };
+}
+
+const CASES = [
+  ['normal',      { c: -0.12, q: -0.05 }],
+  ['mostly-pair', { c: -0.22026, q: -0.22031 }],
+  ['pair-bigger', { c: -0.01764, q: -0.06067 }],
+  ['opposite',    { c: -0.13574, q: 0.02094 }],
+  ['none',        { c: -0.15, q: -0.0004 }],
+  ['flat',        { c: -0.003, q: -0.02 }],
+];
+
+const rows = [];
+for (const kind of ['stock', 'eth', 'coin']) {
+  for (const [name, v] of CASES) rows.push({ group: 'result', title: `${name} · ${kind}`, input: { kind, ...v } });
+}
+rows.push({ group: 'result', title: 'stable · stable', input: { kind: 'stable', c: -0.22031, q: 0 } });
+rows.push({ group: 'result', title: 'stable · stable (up)', input: { kind: 'stable', c: 0.084, q: 0 } });
+
+const extras = [
+  ['normal up · eth', { kind: 'eth', c: 0.30, q: 0.10 }],
+  ['pair-bigger up · stock', { kind: 'stock', c: 0.02, q: 0.08 }],
+  ['flat, pair flat too · eth', { kind: 'eth', c: 0.002, q: 0.001 }],
+  ['since launch + low liquidity · stock', { kind: 'stock', c: -0.31, q: -0.02, sinceLaunch: true, liq: 1200, window: '7d' }],
+  ['no trades in window · coin', { kind: 'coin', c: -0.22031, q: -0.22031, traded: false }],
+  ['unknown liquidity · eth', { kind: 'eth', c: -0.08, q: -0.03, liq: null }],
+  ['huge move · eth', { kind: 'eth', c: 12.5, q: 0.04 }],
+  ['long names · coin', { kind: 'coin', c: -0.42, q: -0.18, coin: COINS.LONG,
+      pair: { address: '0x4444444444444444444444444444444444444444', symbol: 'WRAPPEDPARTYTOKEN', kind: 'coin' } }],
+  ['1h window · stock', { kind: 'stock', c: -0.046, q: -0.012, window: '1h' }],
+];
+for (const [title, input] of extras) rows.push({ group: 'extra', title, input });
+
+for (const code of Object.keys(SETTINGS.wording.errors)) {
+  rows.push({ group: 'error', title: `error · ${code}`, error: { ok: false, code, ...(code === 'is-pair-asset' ? { symbol: 'NVDA' } : {}) } });
+}
+rows.push({ group: 'loading', title: 'loading · first step', loading: 'Finding the pool…' });
+rows.push({ group: 'loading', title: 'loading · later step', loading: 'Reading prices from Robinhood Chain…' });
+
+// ---- Rendering --------------------------------------------------------------------------------
+function build(input) { return core.buildResult(priceInput(input), settings); }
+
+function draw(row, el) {
+  if (row.loading) { renderLoading(el, row.loading, {}); return; }
+  if (row.error) {
+    const err = core.buildError(row.error, settings);
+    renderError(el, err, {
+      settings, window: '24h', coin: COINS.AI.address,
+      onRetry: () => fakeRefresh(row, el, '24h'),
+      onWindow: (w) => fakeRefresh(row, el, w),
+    });
+    return;
+  }
+  const res = build({ ...row.input, window: row.window || row.input.window || '24h' });
+  if (!res.ok) { renderError(el, res, { settings }); return; }
+  renderResult(el, res, { settings, onWindow: (w) => fakeRefresh(row, el, w), prepareImage: false });
+}
+
+// Tabs: show the keep-the-header loading state, then the same numbers under the new window.
+function fakeRefresh(row, el, w) {
+  const coin = row.error ? COINS.AI.address : (row.input.coin || COIN_FOR[row.input.kind]).address;
+  renderLoading(el, 'Finding the pool…', { coin, window: w });
+  setTimeout(() => renderLoading(el, 'Reading prices from Robinhood Chain…', { coin, window: w }), 450);
+  setTimeout(() => {
+    if (row.error) { renderError(el, core.buildError(row.error, settings), { settings, window: w, coin, onWindow: (w2) => fakeRefresh(row, el, w2), onRetry: () => fakeRefresh(row, el, w) }); return; }
+    row.window = w;
+    const res = build({ ...row.input, window: w });
+    renderResult(el, res, { settings, onWindow: (w2) => fakeRefresh(row, el, w2), prepareImage: false });
+  }, 1100);
+}
+
+function makeRow(row, i) {
+  const sec = document.createElement('section');
+  sec.className = 'row';
+  sec.dataset.group = row.group;
+  const head = document.createElement('div');
+  head.className = 'row-head';
+  const h = document.createElement('h2');
+  h.textContent = row.title;
+  head.append(h);
+  if (row.input) {
+    const p = document.createElement('p');
+    p.textContent = `c ${(row.input.c * 100).toFixed(3)}%  q ${(row.input.q * 100).toFixed(3)}%`;
+    head.append(p);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = 'Share image';
+    b.addEventListener('click', () => showImages([row], true));
+    head.append(b);
+  }
+  const frames = document.createElement('div');
+  frames.className = 'frames';
+  for (const kind of ['desk', 'phone']) {
+    const f = document.createElement('div');
+    f.className = `frame frame-${kind}`;
+    const cap = document.createElement('p');
+    cap.className = 'frame-cap';
+    cap.textContent = kind === 'desk' ? 'desktop (920)' : 'phone (375, 16px gutter)';
+    const out = document.createElement('section');
+    out.className = 'result';
+    out.id = `result-${i}-${kind}`;
+    out.setAttribute('aria-live', 'polite');
+    f.append(cap, out);
+    frames.append(f);
+  }
+  sec.append(head, frames);
+  return sec;
+}
+
+function renderAll() {
+  if (!core) return;
+  list.querySelectorAll('.row').forEach((sec, i) => {
+    for (const el of sec.querySelectorAll('.result')) draw(rows[i], el);
+  });
+}
+
+async function showImages(subset, single) {
+  shareOut.classList.toggle('single', !!single);
+  shareOut.replaceChildren();
+  for (const row of subset) {
+    if (!row.input) continue;
+    const res = build({ ...row.input, window: row.window || row.input.window || '24h' });
+    if (!res.ok) continue;
+    const cv = await renderShareImage(res, settings);
+    const fig = document.createElement('figure');
+    const cap = document.createElement('figcaption');
+    cap.textContent = `${row.title} · ${imageFileName(res)} · ${cv.width}×${cv.height}`;
+    fig.append(cv, cap);
+    shareOut.append(fig);
+  }
+  shareOut.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+rows.forEach((row, i) => list.append(makeRow(row, i)));
+renderAll();
+
+document.getElementById('layout').addEventListener('change', (e) => { document.body.dataset.layout = e.target.value; });
+document.getElementById('filter').addEventListener('change', (e) => {
+  for (const sec of list.querySelectorAll('.row')) sec.hidden = e.target.value !== 'all' && sec.dataset.group !== e.target.value;
+});
+document.getElementById('replay').addEventListener('click', renderAll);
+document.getElementById('all-images').addEventListener('click', () => showImages(rows.filter((r) => r.input), false));
+document.getElementById('clear-images').addEventListener('click', () => shareOut.replaceChildren());
+document.getElementById('font').addEventListener('change', async (e) => {
+  const f = e.target.value;
+  settings = { ...SETTINGS, font: f };
+  document.getElementById('font-css').href = FONT_CSS[f];
+  document.documentElement.style.setProperty('--font', `"${FONT_NAME[f]}", "Arial Narrow", Arial, sans-serif`);
+  try { await document.fonts.ready; } catch (err) { /* ignore */ }
+  renderAll();
+});
+
+// Query string helpers for screenshots: ?layout=phone&filter=error&only=3
+const qs = new URLSearchParams(location.search);
+if (qs.get('layout')) { document.getElementById('layout').value = qs.get('layout'); document.body.dataset.layout = qs.get('layout'); }
+if (qs.get('filter')) { const f = document.getElementById('filter'); f.value = qs.get('filter'); f.dispatchEvent(new Event('change')); }
+if (qs.get('font')) { const f = document.getElementById('font'); f.value = qs.get('font'); f.dispatchEvent(new Event('change')); }
+window.__preview = { rows, settings: () => settings, build, showImages };
+</script>
+</body>
+</html>

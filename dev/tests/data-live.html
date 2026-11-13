@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data live test</title>
+<style>
+  :root { --bg: #000; --fg: #fff; --grey: #8b8b8b; --line: #262626; --pair: #2433FF; --coin: #FF4F1F; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.45 -apple-system, system-ui, sans-serif; margin: 0; padding: 24px 16px 64px; }
+  h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 32px 0 8px; }
+  p, .note { color: var(--grey); margin: 4px 0; }
+  button { background: var(--fg); color: var(--bg); border: 0; border-radius: 999px; padding: 8px 16px; font: inherit; font-weight: 600; cursor: pointer; margin: 4px 8px 4px 0; }
+  button:disabled { opacity: .4; cursor: default; }
+  .wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--grey); font-weight: 500; }
+  td.pass::before { content: '✓ '; color: var(--pair); }
+  td.fail::before { content: '✗ '; color: var(--coin); }
+  pre { color: var(--grey); white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>Data live test</h1>
+<p>Runs <code>fetchPriceInput</code> from <code>site/src/data/index.js</code> against the real chain. Add <code>?auto=a,b,c</code> to run on load.</p>
+<p>
+  <button id="run-a">A · pinned reference</button>
+  <button id="run-b">B · live, four windows</button>
+  <button id="run-c">C · errors</button>
+</p>
+<p id="status" class="note">Idle.</p>
+
+<h2>A · Pinned to end block 113120530, 24h (must match the SPEC §5 reference within 0.01 points)</h2>
+<div class="wrap"><table id="ta"><thead><tr><th>Coin</th><th>Pool</th><th>Pair</th><th>Start block</th><th>c</th><th>ref c</th><th>q</th><th>ref q</th><th>r</th><th>ref r</th><th>Match</th><th>Req</th><th>ms</th></tr></thead><tbody></tbody></table></div>
+
+<h2>B · Live, all four windows</h2>
+<div class="wrap"><table id="tb"><thead><tr><th>Coin</th><th>Window</th><th>Pool</th><th>Pair (kind)</th><th>Blocks</th><th>Since launch</th><th>Traded</th><th>c</th><th>q</th><th>r</th><th>Pair side $</th><th>Req</th><th>ms</th></tr></thead><tbody></tbody></table></div>
+
+<h2>C · Errors</h2>
+<div class="wrap"><table id="tc"><thead><tr><th>Input</th><th>Expected</th><th>Got</th><th>Match</th><th>Req</th><th>ms</th></tr></thead><tbody></tbody></table></div>
+
+<h2>Raw results</h2>
+<pre id="json"></pre>
+
+<script type="module">
+import { fetchPriceInput, clearDataCache, dataStats, resetDataStats } from '../../site/src/data/index.js';
+
+const COINS = [
+  { sym: 'ZOLVA', ca: '0x8e04549484d0612be8373a0263b11928a5f7681f', pool: '0x417e1f5361a5296f93a133142651e07d203f7a4ddecaa2de4460f1fb182e6d74', c: -0.15796568698876012, q: -0.06392152800237827, r: -0.100466105993965 },
+  { sym: 'SHRP', ca: '0xb961886115fb9e4f732e20e89efd6d0406c3527f', pool: '0xfd46728cb5b138debe72342f622fcefb1754bbe194ba7a1a389a74fe1e9ec235', c: -0.2202552873338579, q: -0.22031405499806156, r: 7.53735072183126e-05 },
+  { sym: 'ORBIO', ca: '0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3', pool: '0xea9f200e13055b82f175f44f592c4c13dd8c9d9320a66487d3c5cd90d68550ef', c: -0.22031405499806156, q: 0, r: -0.22031405499806156 },
+  { sym: 'NOVUS', ca: '0x5e948189807ad655dd0d180f2e3df3fa1d03cf05', pool: '0xecbb9772874b8a027ffd2aa30dec3c50709fac42e216169107fe482b57c7fea8', c: -0.06864162194557988, q: -0.06392152800237827, r: -0.005042412665605567 },
+  { sym: 'AI', ca: '0x2e8c31162b855a2ffa90f6f8634643ad6f111e18', pool: '0xcbdfea90430a30ee4469c9902e120a77e7c7e4711d5643671c1d1957f2f1ce27', c: -0.1357385800120855, q: 0.020944406699038076, r: -0.1534686763383306 },
+  { sym: 'STRATEGY', ca: '0x168661c52e5922288dfb2b3f323b6cf90eb21e18', pool: '0xa6975f4720a95aa9cdfa9b010a065b0e941534c93f9fa708104c08f0ac029ca0', c: -0.017639167618211382, q: -0.06066797580019678, r: 0.04580787950739862 },
+];
+const END = 113120530, REF_START = 112293925, TOL = 0.0001;   // 0.01 percentage points
+
+const raw = { a: [], b: [], c: [] };
+const $ = (s) => document.querySelector(s);
+const pct = (x) => (x == null || !Number.isFinite(x)) ? '—' : (x >= 0 ? '+' : '−') + Math.abs(x * 100).toFixed(4) + '%';
+const usd = (x) => x == null ? '—' : '$' + Math.round(x).toLocaleString('en-US');
+function changes(p) {
+  const c0 = p.coinInPair.start, c1 = p.coinInPair.end;
+  const u0 = p.pairUsd ? p.pairUsd.start : 1, u1 = p.pairUsd ? p.pairUsd.end : 1;
+  const c = (c1 * u1) / (c0 * u0) - 1, q = u1 / u0 - 1;
+  return { c, q, r: (1 + c) / (1 + q) - 1 };
+}
+function row(table, cells) {
+  const tr = document.createElement('tr');
+  for (const cell of cells) {
+    const td = document.createElement('td');
+    if (cell && typeof cell === 'object') { td.textContent = cell.text; if (cell.cls) td.className = cell.cls; }
+    else td.textContent = cell;
+    tr.appendChild(td);
+  }
+  $(table + ' tbody').appendChild(tr);
+}
+async function timed(fn) {
+  resetDataStats();
+  const t0 = performance.now();
+  const res = await fn();
+  return { res, ms: Math.round(performance.now() - t0), stats: dataStats() };
+}
+const dump = () => { $('#json').textContent = JSON.stringify(raw, null, 1); };
+const status = (t) => { $('#status').textContent = t; };
+
+async function runA() {
+  $('#ta tbody').innerHTML = ''; raw.a = [];
+  clearDataCache();
+  const jobs = [...COINS.map((k) => ({ k, opts: {} })), { k: COINS[2], opts: { poolId: COINS[2].pool }, note: 'pool override' }];
+  for (const { k, opts, note } of jobs) {
+    status('A: ' + k.sym + (note ? ' (' + note + ')' : '') + '…');
+    const { res, ms, stats } = await timed(() => fetchPriceInput(k.ca, '24h', { endBlock: END, ...opts }));
+    const name = k.sym + (note ? ' · ' + note : '');
+    if (!res.ok) { row('#ta', [name, '—', '—', '—', res.code + ' ' + (res.detail || ''), '', '', '', '', '', { text: 'error', cls: 'fail' }, stats.requests, ms]); raw.a.push({ name, res, stats, ms }); continue; }
+    const ch = changes(res);
+    const samePool = res.pool.id === k.pool;
+    const match = samePool && res.start.block === REF_START && Math.abs(ch.c - k.c) <= TOL && Math.abs(ch.q - k.q) <= TOL && Math.abs(ch.r - k.r) <= TOL;
+    row('#ta', [name, res.pool.label + ' ' + res.pool.id.slice(0, 10), res.pair.symbol + ' (' + res.pair.kind + ')', res.start.block,
+      pct(ch.c), pct(k.c), pct(ch.q), pct(k.q), pct(ch.r), pct(k.r),
+      { text: match ? 'yes' : (samePool ? 'no' : 'other pool'), cls: match ? 'pass' : 'fail' }, stats.requests, ms]);
+    raw.a.push({ name, match, samePool, changes: ch, ref: { c: k.c, q: k.q, r: k.r }, res, stats, ms });
+    dump();
+  }
+  status('A done.'); dump();
+}
+
+async function runB() {
+  $('#tb tbody').innerHTML = ''; raw.b = [];
+  for (const k of COINS) {
+    clearDataCache();
+    for (const w of ['24h', '1h', '6h', '7d']) {
+      status('B: ' + k.sym + ' ' + w + '…');
+      const { res, ms, stats } = await timed(() => fetchPriceInput(k.ca, w));
+      if (!res.ok) { row('#tb', [k.sym, w, res.code + ' ' + (res.detail || ''), '', '', '', '', '', '', '', '', stats.requests, ms]); raw.b.push({ sym: k.sym, w, res, stats, ms }); continue; }
+      const ch = changes(res);
+      row('#tb', [k.sym, w, res.pool.label + ' ' + res.pool.id.slice(0, 10), res.pair.symbol + ' (' + res.pair.kind + ')' + (res.pairVia ? ' via ' + res.pairVia.label : ''),
+        res.start.block + '→' + res.end.block, res.sinceLaunch ? 'yes' : 'no', res.tradedInWindow ? 'yes' : 'no',
+        pct(ch.c), pct(ch.q), pct(ch.r), usd(res.pool.pairSideUsd), stats.requests, ms]);
+      raw.b.push({ sym: k.sym, w, changes: ch, res, stats, ms });
+      dump();
+    }
+  }
+  status('B done.'); dump();
+}
+
+async function runC() {
+  $('#tc tbody').innerHTML = ''; raw.c = [];
+  clearDataCache();
+  const rand = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(20)), (b) => b.toString(16).padStart(2, '0')).join('');
+  const cases = [
+    ['hello', 'bad-address'],
+    ['0x' + 'a'.repeat(39), 'bad-address'],
+    [rand, 'not-a-token'],
+    ['0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec', 'is-pair-asset (NVDA)'],
+    ['0x5fc5360d0400a0fd4f2af552add042d716f1d168', 'is-pair-asset (USDG)'],
+    ['0x0bd7d308f8e1639fab988df18a8011f41eacad73', 'is-pair-asset (WETH)'],
+    ['0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', 'wrong-chain'],
+    ['0xa3284897ad7c8fed700b04f573cf64e4f6c10f2c', 'not is-pair-asset (copycat NVDA)'],
+    ['0x5db4e79e4d055c273bd0e093fa8e235861e9f877', 'not is-pair-asset (fake USDG)'],
+  ];
+  for (const [input, want] of cases) {
+    status('C: ' + input + '…');
+    const { res, ms, stats } = await timed(() => fetchPriceInput(input, '24h'));
+    const got = res.ok ? 'ok: ' + res.pool.label + ' (' + res.pair.kind + ')' : res.code + (res.symbol ? ' (' + res.symbol + ')' : '') + (res.detail ? ' — ' + res.detail : '');
+    const pass = want.startsWith('not ') ? !(res.code === 'is-pair-asset') : got.startsWith(want);
+    row('#tc', [input, want, got, { text: pass ? 'yes' : 'no', cls: pass ? 'pass' : 'fail' }, stats.requests, ms]);
+    raw.c.push({ input, want, got, pass, res, stats, ms });
+    dump();
+  }
+  status('C done.'); dump();
+}
+
+const buttons = ['#run-a', '#run-b', '#run-c'].map((s) => $(s));
+async function guard(fn) {
+  buttons.forEach((b) => { b.disabled = true; });
+  try { await fn(); } catch (e) { status('Crashed: ' + e); console.error(e); }
+  buttons.forEach((b) => { b.disabled = false; });
+}
+$('#run-a').onclick = () => guard(runA);
+$('#run-b').onclick = () => guard(runB);
+$('#run-c').onclick = () => guard(runC);
+const auto = new URLSearchParams(location.search).get('auto');
+if (auto) guard(async () => { for (const s of auto.split(',')) await ({ a: runA, b: runB, c: runC })[s.trim()](); });
+window.__dataLive = raw;
+</script>
+</body>
+</html>
