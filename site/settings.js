@@ -42,15 +42,16 @@ export const SETTINGS = {
 
   // ---- Feature switches ----------------------------------------------
   features: {
-    offHoursMode: false,    // Sunday: shows if the move happened while the US market was closed
-    stockBoard: false,      // Monday: the Stock-Paired Board
+    offHoursMode: false,    // after launch: shows if the move happened while the US market was closed
+    stockBoard: false,      // after launch: the Stock-Paired Board
   },
 
   // ---- Stock-Paired Board (shows when stockBoard above is true) ------
   board: {
     window: "24h",          // the time window it opens on: "1h", "6h", "24h" or "7d"
     maxRows: 25,            // show at most this many coins
-    hide: [],               // coins to leave off, by ticker in quotes, for example ["MEME", "GAS"]
+    // Coins to leave off, by ticker in quotes. GME and AMD here are coins that copy a stock's name, not the stock tokens.
+    hide: ["BONER", "NASTY", "urmom", "GME", "AMD"],
     wording: {
       title: "Stock-paired board",
       intro: "Coins paired with a stock token, ranked by their own move: what's left after taking out the stock's move.",
@@ -89,7 +90,7 @@ export const SETTINGS = {
 
   // ---- Update log (newest first) -------------------------------------
   updates: [
-    { date: "2026-11-14", text: "Blame the Stock is live. Paste any Robinhood Chain coin." },
+    { date: "2026-11-17", text: "Blame the Stock is live. Paste any Robinhood Chain coin." },
   ],
 
   // ---- Safety limits (change only if you know why) -------------------

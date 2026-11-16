@@ -84,9 +84,9 @@ test('settings: switch off by default, board block has its defaults', () => {
   eq(SETTINGS.features.stockBoard, false);
   eq(SETTINGS.board.window, '24h');
   eq(SETTINGS.board.maxRows, 25);
-  eq(SETTINGS.board.hide, []);
+  eq(SETTINGS.board.hide, ["BONER", "NASTY", "urmom", "GME", "AMD"]);   // owner chose these on Nov 15
   const cfg = boardSettings(SETTINGS);
-  eq([cfg.window, cfg.maxRows, cfg.hide.length], ['24h', 25, 0]);
+  eq([cfg.window, cfg.maxRows, cfg.hide.length], ['24h', 25, 5]);   // 5 hidden coins (owner's choice)
   ok(/\{count\}/.test(cfg.words.loading), 'loading line counts the coins');
   eq(cfg.words.failed, "Couldn't load the board right now.");
 });
