@@ -68,7 +68,7 @@ test("owner's case: c −12%, q −5% -> r −7.4%, share 40%", () => {
 test('SPEC share text example (ETH pair)', () => {
   const res = build({ coin: 'ZOLVA', kind: 'eth', c: -0.12, q: -0.05 });
   eq(res.shareText, 'My $ZOLVA is down 12% (24h). About 40% of that is Ethereum.');
-  eq(res.link, 'https://blamethestock.xyz/?ca=' + ADDR.ZOLVA + '&w=24h');
+  eq(res.link, 'https://blamethestock.com/?ca=' + ADDR.ZOLVA + '&w=24h');
 });
 
 // ---------------------------------------------------------------- every case, every pair kind
@@ -186,10 +186,10 @@ test('since launch: note, window label, share text and link', () => {
   eq(res.window, '24h'); eq(res.windowLabel, 'since launch');
   eq(res.notes[0], "This coin's pool is only 3 hours old, so this covers its whole life, not the full 24h.");
   eq(res.shareText, 'My $ZOLVA is down 12% (since launch). About 40% of that is Ethereum.');
-  eq(res.link, 'https://blamethestock.xyz/?ca=' + ADDR.ZOLVA + '&w=24h');
+  eq(res.link, 'https://blamethestock.com/?ca=' + ADDR.ZOLVA + '&w=24h');
   const week = build({ c: 0.5, q: 0.1, window: '7d', sinceLaunch: true, createdAt: T_END - 2 * 86400 - 5 });
   eq(week.notes[0], "This coin's pool is only 2 days old, so this covers its whole life, not the full 7d.");
-  eq(week.link, 'https://blamethestock.xyz/?ca=' + ADDR.ZOLVA + '&w=7d');
+  eq(week.link, 'https://blamethestock.com/?ca=' + ADDR.ZOLVA + '&w=7d');
 });
 
 test('since launch with no createdAt uses the start block time', () => {
@@ -670,7 +670,7 @@ test('validateAddress() ignores copy-paste junk (bidi marks, word joiner, BOM, N
   }
   eq(validateAddress('0x\u200B'), null);
   eq(validateAddress('０x2e8c31162b855a2ffa90f6f8634643ad6f111e18'), null);   // full-width zero is not hex
-  eq(validateAddress('https://blamethestock.xyz/?ca=' + a), null);
+  eq(validateAddress('https://blamethestock.com/?ca=' + a), null);
 });
 
 test('every sentence, every pair kind, a grid of moves: plain, consistent, no bad characters', () => {

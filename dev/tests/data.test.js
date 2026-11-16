@@ -720,9 +720,9 @@ test('a visitor clock 5 minutes fast: the web server\'s Date header says the cha
   let heads = 0;
   try {
     Date.now = () => realNow() + 300000;
-    _setTransport({ pageUrl: 'https://blamethestock.xyz/' });
+    _setTransport({ pageUrl: 'https://blamethestock.com/' });
     intercept(m, (url, init) => {
-      if (url === 'https://blamethestock.xyz/') { heads++; eq(init.method, 'HEAD'); return httpReply(200, null, { date: new Date(realNow()).toUTCString() }); }
+      if (url === 'https://blamethestock.com/') { heads++; eq(init.method, 'HEAD'); return httpReply(200, null, { date: new Date(realNow()).toUTCString() }); }
     });
     const r = await fetchPriceInput(MOCK, '24h');
     ok(r.ok, JSON.stringify(r));
@@ -736,8 +736,8 @@ test('a visitor clock 5 minutes fast: the web server\'s Date header says the cha
 
 test('really stale (the server\'s clock agrees) -> stale', async () => {
   const m = mockWorld({ lag: 600 });
-  _setTransport({ pageUrl: 'https://blamethestock.xyz/' });
-  intercept(m, (url) => { if (url === 'https://blamethestock.xyz/') return httpReply(200, null, { date: new Date().toUTCString() }); });
+  _setTransport({ pageUrl: 'https://blamethestock.com/' });
+  intercept(m, (url) => { if (url === 'https://blamethestock.com/') return httpReply(200, null, { date: new Date().toUTCString() }); });
   try { eq((await fetchPriceInput(MOCK, '24h')).code, 'stale'); } finally { _setTransport({ pageUrl: null }); }
 });
 

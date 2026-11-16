@@ -25,7 +25,7 @@ export const SETTINGS = {
   // ---- Site and X ----------------------------------------------------
   site: {
     name: "Blame the Stock",
-    url: "https://blamethestock.xyz",       // no slash at the end
+    url: "https://blamethestock.com",       // no slash at the end
     description: "Paste a Robinhood Chain coin. See how much of its move came from what it's paired with.",
   },
   xHandle: "",              // your X handle without the @. Empty = the X link is hidden.

@@ -6,7 +6,7 @@ The owner is not a developer. They are asleep; nothing may be published, deploye
 ---------------------------------------------------------------------
 ## 0. The owner's brief (verbatim requirements, still binding)
 
-WHAT: A one-page website, Blame the Stock (blamethestock.xyz). A visitor pastes the contract address of any
+WHAT: A one-page website, Blame the Stock (blamethestock.com). A visitor pastes the contract address of any
 Robinhood Chain coin. The site shows how much of that coin's price move came from the asset it is paired with,
 and how much came from the coin itself. Example: "You're down 12%. About 40% of that is the stock (NVDA)."
 A memecoin $BLAME launches alongside it on Pons (Sat 14 Nov 2026 ~10am US Eastern).
@@ -203,7 +203,7 @@ Result = {
              { key:'own',  label:'ZOLVA vs NVDA', value:r, text, arrow } ],
   notes: [string], warnings: [string],           // warnings = low liquidity; notes = since launch, no trades, pool
   asOf: unix s, asOfText: 'Prices as of 12:37 AM EST',
-  shareText: string, link: 'https://blamethestock.xyz/?ca=0x…&w=24h',
+  shareText: string, link: 'https://blamethestock.com/?ca=0x…&w=24h',
   pool: { label, pairSideUsd }
 }
 Invariant: (1+c) = (1+q)(1+r) to 1e-12. Wording comes from SETTINGS.wording (templates with {placeholders}).
