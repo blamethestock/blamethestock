@@ -90,7 +90,8 @@ export const SETTINGS = {
 
   // ---- Update log (newest first) -------------------------------------
   updates: [
-    { date: "2026-11-17", text: "Blame the Stock is live. Paste any Robinhood Chain coin." },
+    // whenLaunched: true = this entry only shows after you switch launched (above) to true.
+    { date: "2026-11-17", text: "Blame the Stock is live. Paste any Robinhood Chain coin.", whenLaunched: true },
   ],
 
   // ---- Safety limits (change only if you know why) -------------------

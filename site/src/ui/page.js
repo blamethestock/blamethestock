@@ -252,7 +252,10 @@ function fillUpdates() {
   const section = byId('updates');
   const list = byId('updates-list');
   if (!section || !list) return;
-  const items = (Array.isArray(S.updates) ? S.updates : []).filter((u) => u && text(u.text));
+  const launched = !!(S.token && S.token.launched === true);
+  // Entries marked whenLaunched stay hidden until token.launched is switched on.
+  const items = (Array.isArray(S.updates) ? S.updates : [])
+    .filter((u) => u && text(u.text) && (u.whenLaunched !== true || launched));
   section.hidden = items.length === 0;
   list.replaceChildren(...items.map((u) => h('li', {},
     h('time', { datetime: /^\d{4}-\d{2}-\d{2}$/.test(text(u.date)) ? text(u.date) : null }, niceDate(u.date)),
