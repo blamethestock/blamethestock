@@ -64,10 +64,12 @@ export const SETTINGS = {
   },
 
   // ---- Example coins under the paste box (tap to try) ----------------
+  // Big, long-running coins with real money in their main pool, so every window (1h to 7d) works.
+  // Careful: newer copies use the same names. These are the originals (checked Nov 15).
   examples: [
-    { label: "AI",    address: "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18" },  // paired with NVDA
-    { label: "ZOLVA", address: "0x8e04549484d0612be8373a0263b11928a5f7681f" },  // paired with ETH
-    { label: "SHRP",  address: "0xb961886115fb9e4f732e20e89efd6d0406c3527f" },  // paired with ORBIO
+    { label: "AI",      address: "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18" },  // paired with NVDA, since July
+    { label: "PONS",    address: "0x39dbed3a2bd333467115de45665cc57f813c4571" },  // Pons launchpad coin, paired with ETH
+    { label: "CASHCAT", address: "0x020bfc650a365f8bb26819deaabf3e21291018b4" },  // paired with ETH, since July
   ],
 
   // ---- Time windows --------------------------------------------------
