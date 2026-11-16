@@ -86,38 +86,116 @@ function setupReveals(reduce) {
   els.forEach((el) => io.observe(el));
 }
 
-// ---- how it works: three stops while the panel is pinned (CSS sticky, no scroll-jacking) ----
+// ---- how it works: three steps and one example card that fills in as they go ----
+// Wide screens: the panel stays put while you scroll (CSS sticky, no scroll-jacking). The line on the left
+// fills, each step lights up when the line reaches it, and the card adds that step's part. Nothing is taken
+// away, so the last stop shows the whole story at once.
+// Phones: three blocks one after another. Each gets its own copy of the card holding everything up to that
+// step, fades in as it arrives, and its dot lights when it reaches the middle of the screen.
+const HOW_PINNED = '(min-width: 900px) and (min-height: 561px)'; // same as the sticky rule in styles.css
+const HOW_WIDE = '(min-width: 900px)';
+const HOW_STARTS = [0, 0.28, 0.64]; // where steps 1, 2 and 3 start, as a share of the pinned scroll
+
 function setupHow() {
-  const track = document.querySelector('#how .how-track');
+  const section = document.getElementById('how');
+  const track = section && section.querySelector('.how-track');
   if (!track) return null;
   const steps = Array.from(track.querySelectorAll('.how-step'));
-  const bars = Array.from(track.querySelectorAll('.how-progress span'));
-  let current = -1;
+  const nodes = steps.map((step) => step.querySelector('.how-node') || step);
+  const demo = track.querySelector('.how-demo');
+  const parts = demo ? Array.from(demo.querySelectorAll('[data-at]')) : [];
+  const atOf = (el) => Number(el.getAttribute('data-at')) || 1;
+  const query = (q) => {
+    try { return window.matchMedia ? window.matchMedia(q) : null; } catch (e) { return null; }
+  };
+  const pinnedQ = query(HOW_PINNED);
+  const wideQ = query(HOW_WIDE);
 
-  function show(index) {
-    if (index === current) return;
-    current = index;
+  // The phone copies: step N's card holds the parts of steps 1..N.
+  if (demo) {
     steps.forEach((step, i) => {
-      step.classList.toggle('is-active', i === index);
-      step.classList.toggle('is-before', i < index);
+      const body = step.querySelector('.how-body') || step;
+      if (body.querySelector('.how-mini')) return;
+      const mini = demo.cloneNode(true);
+      mini.classList.remove('how-demo');
+      mini.classList.add('how-mini');
+      mini.querySelectorAll('[data-at]').forEach((el) => {
+        if (atOf(el) > i + 1) el.remove();
+        else el.classList.add('is-on');
+      });
+      body.appendChild(mini);
     });
   }
-  function update() {
-    if (!document.documentElement.classList.contains('motion') || !steps.length) return;
-    const rect = track.getBoundingClientRect();
-    const scrollable = Math.max(1, rect.height - window.innerHeight);
-    const p = clamp(-rect.top / scrollable, 0, 1);
-    const n = steps.length;
-    show(Math.min(n - 1, Math.floor(p * n)));
-    bars.forEach((bar, i) => bar.style.setProperty('--p', clamp(p * n - i, 0, 1).toFixed(3)));
+
+  function paint(active, fills, done) {
+    steps.forEach((step, i) => {
+      step.classList.toggle('is-active', i === active);
+      step.classList.toggle('is-done', done ? true : i < active);
+      step.style.setProperty('--fill', clamp(fills[i], 0, 1).toFixed(3));
+    });
   }
+
+  // Everything showing, nothing moving (reduced motion, short windows that don't pin).
   function makeStatic() {
-    current = -1;
-    steps.forEach((step) => {
-      step.classList.add('is-active');
-      step.classList.remove('is-before');
-    });
+    section.classList.remove('is-pinned');
+    steps.forEach((step) => step.classList.add('is-seen'));
+    paint(-1, steps.map(() => 1), true);
+    parts.forEach((el) => el.classList.add('is-on'));
   }
+
+  function update() {
+    if (!steps.length) return;
+    if (!document.documentElement.classList.contains('motion')) {
+      makeStatic();
+      return;
+    }
+    const vh = window.innerHeight;
+    const pinned = pinnedQ ? pinnedQ.matches : false;
+    const wide = wideQ ? wideQ.matches : viewportWidth() >= 900;
+    section.classList.toggle('is-pinned', pinned);
+
+    if (pinned) {
+      const rect = track.getBoundingClientRect();
+      const p = clamp(-rect.top / Math.max(1, rect.height - vh), 0, 1);
+      // Nothing is lit while the panel is still sliding up into view; step 1 lights once it's well in.
+      let active = -1;
+      if (rect.top < vh * 0.45) {
+        active = 0;
+        while (active < steps.length - 1 && p >= HOW_STARTS[active + 1]) active++;
+      }
+      const fills = steps.map((_, i) => {
+        const from = HOW_STARTS[i];
+        const to = HOW_STARTS[i + 1];
+        return to === undefined ? 1 : (p - from) / (to - from);
+      });
+      steps.forEach((step) => step.classList.add('is-seen'));
+      paint(active, fills, false);
+      parts.forEach((el) => el.classList.toggle('is-on', atOf(el) <= active + 1));
+      return;
+    }
+
+    if (wide) {
+      makeStatic();
+      return;
+    }
+
+    // Phones: a reading line a bit below the middle of the screen lights the dots and fills the line.
+    const line = vh * 0.62;
+    const boxes = nodes.map((node) => node.getBoundingClientRect());
+    let active = -1;
+    steps.forEach((step, i) => {
+      if (step.getBoundingClientRect().top < vh * 0.9) step.classList.add('is-seen');
+      if (boxes[i].top + boxes[i].height / 2 < line) active = i;
+    });
+    const fills = steps.map((_, i) => {
+      const next = boxes[i + 1];
+      if (!next) return 1;
+      const from = boxes[i].bottom;
+      return (line - from) / Math.max(1, next.top - from);
+    });
+    paint(active, fills, false);
+  }
+
   return { update, makeStatic };
 }
 

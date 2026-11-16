@@ -111,69 +111,74 @@
     <!-- 3. Result card (filled by src/app.js + src/ui/card.js) -->
     <section id="result" aria-live="polite"></section>
 
-    <!-- 4. How it works: three scroll stops -->
+    <!-- 4. How it works: the three steps, and one example card that fills in as they go.
+         Wide screens: the panel stays put while you scroll; the steps light up one by one and the card adds
+         its next part (nothing is taken away, so the last stop shows the whole story).
+         Phones: three blocks one after another; src/ui/motion.js gives each block its own copy of the card,
+         holding everything up to that step. data-at = the step that adds that part of the card. -->
     <section class="section how" id="how" aria-labelledby="how-title">
-      <div class="section-head" data-reveal>
-        <h2 class="section-label" id="how-title"><span>How it works</span></h2>
-      </div>
-
       <div class="how-track">
         <div class="how-pin">
-          <div class="how-progress" aria-hidden="true"><span></span><span></span><span></span></div>
-          <ol class="how-steps">
-            <li class="how-step is-active">
-              <div class="how-copy">
-                <p class="how-count">1 / 3</p>
-                <h3 class="how-title">Your coin moved.</h3>
-                <p class="how-text">Say it's down 12% over the last day. That's the number your wallet shows you.</p>
-              </div>
-              <div class="how-visual" aria-hidden="true">
-                <div class="viz-row">
-                  <span class="viz-label"><i class="viz-key viz-key-coin"></i>Your coin</span>
-                  <span class="viz-chip">24h</span>
+          <div class="section-head" data-reveal>
+            <h2 class="section-label" id="how-title"><span>How it works</span></h2>
+          </div>
+
+          <div class="how-stage">
+            <ol class="how-steps">
+              <li class="how-step">
+                <span class="how-node" aria-hidden="true">1</span>
+                <div class="how-body">
+                  <h3 class="how-title">Your coin moved.</h3>
+                  <p class="how-text">Say it's down 12% over the last day. That's the number your wallet shows you.</p>
                 </div>
-                <div class="viz-big">−12%</div>
-                <div class="viz-foot"><span class="viz-arrow">↓</span> down 12%</div>
-              </div>
-            </li>
-            <li class="how-step">
-              <div class="how-copy">
-                <p class="how-count">2 / 3</p>
-                <h3 class="how-title">So did what it's paired with.</h3>
-                <p class="how-text">Most coins trade against something else: a stock token like NVDA, Ethereum, or another coin. If that fell 5%, it dragged your coin down with it.</p>
-              </div>
-              <div class="how-visual" aria-hidden="true">
-                <div class="viz-row viz-dim">
-                  <span class="viz-label"><i class="viz-key viz-key-coin"></i>Your coin</span>
-                  <span class="viz-small">−12%</span>
+              </li>
+              <li class="how-step">
+                <span class="how-node" aria-hidden="true">2</span>
+                <div class="how-body">
+                  <h3 class="how-title">So did what it's paired with.</h3>
+                  <p class="how-text">Most coins trade against something else: a stock token, Ethereum or another coin. Here it's NVDA, down 5% in the same hours.</p>
                 </div>
-                <div class="viz-row">
-                  <span class="viz-label"><i class="viz-key viz-key-pair"></i>Paired with</span>
-                  <span class="viz-chip">NVDA</span>
+              </li>
+              <li class="how-step">
+                <span class="how-node" aria-hidden="true">3</span>
+                <div class="how-body">
+                  <h3 class="how-title">Here's the split.</h3>
+                  <p class="how-text">We read both prices from Robinhood Chain for the same start and end time, then split your move: 40% came from NVDA, 60% is the coin's own.</p>
                 </div>
-                <div class="viz-big">−5%</div>
-                <div class="viz-foot"><span class="viz-arrow">↓</span> down 5% in the same hours</div>
+              </li>
+            </ol>
+
+            <div class="how-card how-demo" aria-hidden="true">
+              <div class="viz-top">
+                <span class="viz-tag">Example</span>
+                <span class="viz-chip">24h</span>
               </div>
-            </li>
-            <li class="how-step">
-              <div class="how-copy">
-                <p class="how-count">3 / 3</p>
-                <h3 class="how-title">Here's the split.</h3>
-                <p class="how-text">We read both prices straight from Robinhood Chain, for the same start and end time, and split your move in two: the part that came from the pair, and the part that's the coin's own.</p>
+              <div class="viz-chain">
+                <div class="viz-row" data-at="1">
+                  <span class="viz-who"><i class="viz-key viz-key-coin"></i><span><b class="viz-name">Your coin</b><span class="viz-sub">last 24 hours</span></span></span>
+                  <span class="viz-move"><span class="viz-big">−12%</span><span class="viz-arrow">↓</span></span>
+                </div>
+                <div class="viz-link" data-at="2">paired with</div>
+                <div class="viz-row" data-at="2">
+                  <span class="viz-who"><i class="viz-key viz-key-pair"></i><span><b class="viz-name">NVDA</b><span class="viz-sub">stock token, same hours</span></span></span>
+                  <span class="viz-move"><span class="viz-big">−5%</span><span class="viz-arrow">↓</span></span>
+                </div>
               </div>
-              <div class="how-visual" aria-hidden="true">
+              <div class="viz-split" data-at="3">
                 <p class="viz-verdict">You're down 12%. About 40% of that is the stock (NVDA).</p>
-                <div class="viz-bar">
-                  <span class="viz-seg viz-seg-pair" style="flex-grow:40"></span>
-                  <span class="viz-seg viz-seg-coin" style="flex-grow:60"></span>
-                </div>
+                <div class="viz-bar"><span class="viz-seg viz-seg-pair"></span><span class="viz-seg viz-seg-coin"></span></div>
                 <div class="viz-legend">
-                  <span><i class="viz-key viz-key-pair"></i>40% the stock (NVDA)</span>
-                  <span><i class="viz-key viz-key-coin"></i>60% the coin itself</span>
+                  <span><i class="viz-key viz-key-pair"></i>NVDA <b>40%</b></span>
+                  <span><i class="viz-key viz-key-coin"></i>The coin <b>60%</b></span>
                 </div>
               </div>
-            </li>
-          </ol>
+              <dl class="viz-nums" data-at="3">
+                <div><dt>Coin in $</dt><dd><span class="viz-arrow">↓</span>−12%</dd></div>
+                <div><dt>NVDA</dt><dd><span class="viz-arrow">↓</span>−5%</dd></div>
+                <div><dt>Coin vs NVDA</dt><dd><span class="viz-arrow">↓</span>−7.4%</dd></div>
+              </dl>
+            </div>
+          </div>
         </div>
       </div>
     </section>
