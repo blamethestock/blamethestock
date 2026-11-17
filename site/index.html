@@ -40,20 +40,8 @@
   <link rel="stylesheet" href="src/ui/card.css">
   <!-- The Stock-Paired Board's stylesheet (src/features/board.css) is added by src/ui/page.js only when the board is on. -->
 
-  <script>
-    // Tiny early switch: lets the page hide things that animate in, before they flash.
-    // If the page script never starts (very old browser, blocked file), show everything after 4 s.
-    (function () {
-      var d = document.documentElement;
-      d.classList.add('js');
-      try {
-        if (!window.matchMedia || !matchMedia('(prefers-reduced-motion: reduce)').matches) d.classList.add('motion');
-      } catch (e) {}
-      setTimeout(function () {
-        if (!d.classList.contains('page-ok')) d.classList.remove('js', 'motion');
-      }, 4000);
-    })();
-  </script>
+  <!-- Tiny early switch (kept in its own file so the safety rules can forbid code written into the page). -->
+  <script src="src/early.js"></script>
   <!-- Fetch page.js's own imports at the same time as page.js, so the headline is filled sooner. -->
   <link rel="modulepreload" href="settings.js">
   <link rel="modulepreload" href="src/ui/motion.js">

@@ -6,12 +6,39 @@ import http.server, os, sys, urllib.parse
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ALLOWED = ('site/assets/', 'dev/out/')
 
+def site_headers():
+    """Headers for '/*' from site/_headers (Cloudflare's format: a path line, then indented 'Name: value' lines)."""
+    out, active = [], False
+    try:
+        lines = open(os.path.join(ROOT, 'site', '_headers'), encoding='utf-8').read().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        if not line[0].isspace():
+            active = line.strip() == '/*'
+        elif active and ':' in line:
+            name, value = line.strip().split(':', 1)
+            out.append((name.strip(), value.strip()))
+    return out
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=ROOT, **kw)
 
     def end_headers(self):
         self.send_header('Cache-Control', 'no-store')
+        # Pages under /site/ get the same safety headers Cloudflare will send (site/_headers),
+        # minus the two that only make sense on https.
+        if self.path.startswith('/site/'):
+            for name, value in site_headers():
+                if name.lower() == 'strict-transport-security':
+                    continue
+                if name.lower() == 'content-security-policy':
+                    value = '; '.join(p for p in value.split('; ') if p.strip() != 'upgrade-insecure-requests')
+                self.send_header(name, value)
         super().end_headers()
 
     def do_POST(self):
