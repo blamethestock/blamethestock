@@ -24,14 +24,14 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = false               # only reachable on the custom domain once deployed
 
 # Custom domain, turned on at deploy time (step 3 above):
-# routes = [
-#   { pattern = "api.blamethestock.com", custom_domain = true }
-# ]
+routes = [
+  { pattern = "api.blamethestock.com", custom_domain = true }
+]
 
 [[d1_databases]]
 binding = "DB"
 database_name = "bts"
-database_id = "REPLACE_AT_DEPLOY"
+database_id = "6973e4d6-b6d6-4717-a88e-a0c44beca8f1"
 
 # Every minute: the launch indexer (new TokenLaunched events, name()/symbol()), then queued report/link jobs.
 [triggers]
