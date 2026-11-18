@@ -17,8 +17,8 @@ their Swap logs.
 import json, os, sys, time, datetime, urllib.request, urllib.error
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEFAULT_LIST = ('<scratch>'
-                '73b780b5-0b23-480d-8296-954c812cbf54/scratchpad/wf/addresses/data/robinhood_stock_tokens_4663.json')
+# The official stock-token list (JSON from Robinhood's asset list + StockFactory check); pass its path as an argument.
+DEFAULT_LIST = os.path.join(ROOT, 'dev', 'data', 'robinhood_stock_tokens_4663.json')
 OUT_JS = os.path.join(ROOT, 'site', 'src', 'data', 'stocks.js')
 
 OFFICIAL = 'https://rpc.mainnet.chain.robinhood.com'
