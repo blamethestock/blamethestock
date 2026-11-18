@@ -1,0 +1,221 @@
+/* Blame the Stock: the copy check card ("Is this the real one?") in #copies, and the read-only trust lines.
+   Builds on the result card's look (card.css: .bts-card, its colours, border and size container).
+   Accents only as tiny dots: vermilion = a warning flag. Everything else is black, white and grey. */
+
+/* ---- the mount under the blame card ---------------------------------------------------------------- */
+#copies {
+  position: relative;
+  z-index: 2;
+  width: min(calc(100% - 2 * var(--gutter, 16px)), var(--max, 1200px));
+  margin: 16px auto 0;
+  scroll-margin-top: calc(var(--menu-top, 12px) + var(--menu-h, 54px) + 16px);
+}
+#copies:empty { display: none; }
+#result:empty + #copies { margin-top: 0; }
+
+/* The "How it works" panel keeps its usual gap after a card (styles.css only knows #result). */
+@media (min-width: 900px) and (min-height: 561px) {
+  .motion #copies:not(:empty) + .how { padding-top: clamp(32px, 4vw, 64px); }
+  .motion #result:not(:empty) + #copies:empty + .how { padding-top: clamp(32px, 4vw, 64px); }
+}
+
+/* ---- trust lines (hero and footer) ------------------------------------------------------------------- */
+.hero-trust { margin: 6px auto 0; max-width: 62ch; color: var(--grey, #8b8b8b); font-size: 14px; line-height: 1.45; }
+.footer-trust { margin: 36px 0 0; color: var(--fg, #fff); font-size: 14px; line-height: 1.5; }
+.footer-trust + .footer-notes { margin-top: 16px; }
+
+/* ---- one grey line (API unreachable, or an error it explained) ---------------------------------------- */
+.cc-line {
+  margin: 0 auto; max-width: 920px; padding: 4px clamp(20px, 5%, 44px);
+  color: var(--grey, #8b8b8b); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere;
+}
+
+/* ---- the card ---------------------------------------------------------------------------------------- */
+.cc-card { --cc-row: #0b0b0b; --cc-dim: #5c5c5c; }
+.cc-card a { color: inherit; }
+.cc-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px;
+  padding-bottom: clamp(14px, 3cqi, 20px);
+  border-bottom: 1px solid var(--bts-line);
+}
+.cc-title {
+  margin: 0;
+  font-size: 12px; font-weight: 600; line-height: 1.2; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--bts-grey);
+}
+.cc-query {
+  margin: 0; min-width: 0; max-width: 100%;
+  font-size: 13px; font-weight: 600; letter-spacing: .04em; color: var(--bts-fg);
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+.cc-verdict {
+  margin: clamp(20px, 4cqi, 32px) 0 0;
+  font-size: clamp(24px, 4.4cqi, 40px); font-weight: 700; line-height: 1.1; letter-spacing: -.02em;
+  text-wrap: balance; overflow-wrap: anywhere;
+}
+.cc-progress { margin-top: clamp(20px, 4cqi, 28px); }
+
+/* ---- official badge ------------------------------------------------------------------------------------ */
+.cc-official {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+  margin-top: clamp(18px, 3cqi, 24px); padding: 14px 16px;
+  border: 1px solid var(--bts-fg); border-radius: 14px;
+}
+.cc-badge { font-size: 16px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+.cc-official .cc-addr { flex: 1 1 22em; }
+
+/* ---- address + copy + explorer -------------------------------------------------------------------------- */
+.cc-addr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; font-size: 13px; }
+.cc-addr-text {
+  min-width: 0; margin-right: 4px;
+  color: var(--bts-grey); text-decoration: none; letter-spacing: .02em;
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+.cc-official .cc-addr-text { color: var(--bts-fg); font-size: 14px; }
+a.cc-addr-text:hover { color: var(--bts-fg); text-decoration: underline; text-underline-offset: 3px; }
+.cc-addr.is-full .cc-addr-short { display: none; }
+.cc-tool {
+  appearance: none; -webkit-appearance: none; margin: 0;
+  display: inline-flex; align-items: center; min-height: 30px; padding: 0 11px;
+  border: 1px solid var(--bts-edge); border-radius: 999px; background: transparent; color: var(--bts-fg);
+  font: inherit; font-size: 12px; font-weight: 600; line-height: 1; text-decoration: none; white-space: nowrap;
+  cursor: pointer; transition: border-color .15s;
+}
+.cc-tool:hover { border-color: var(--bts-fg); }
+
+/* ---- timeline -------------------------------------------------------------------------------------------- */
+.cc-timeline { position: relative; margin: clamp(22px, 4cqi, 32px) 0 0; padding: 0; list-style: none; }
+.cc-row {
+  position: relative;
+  display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 0 12px;
+  padding: 16px 14px 18px 6px;
+  border: 1px solid transparent; border-radius: 14px;
+}
+.cc-row + .cc-row { margin-top: 2px; }
+/* the line joining the dots */
+.cc-row::before {
+  content: ""; position: absolute; left: 16px; top: 0; bottom: 0; width: 1px; background: var(--bts-line);
+}
+.cc-timeline > .cc-row:first-child::before { top: 24px; }
+.cc-timeline > .cc-row:last-child::before { bottom: auto; height: 24px; }
+.cc-timeline > .cc-row:only-child::before { display: none; }
+.cc-node {
+  position: relative; z-index: 1; justify-self: center;
+  width: 9px; height: 9px; margin-top: 7px; border-radius: 50%;
+  background: var(--bts-edge); box-shadow: 0 0 0 4px var(--bts-bg);
+}
+.cc-row.is-warn .cc-node { background: var(--bts-coin); }
+.cc-row.is-query { background: var(--cc-row); border-color: var(--bts-edge); }
+.cc-row.is-official:not(.is-query) { border-color: var(--bts-line); }
+.cc-row.is-query .cc-node { box-shadow: 0 0 0 3px var(--cc-row), 0 0 0 4px var(--bts-fg); }
+.cc-row.is-query::before { box-shadow: none; }
+.cc-main { min-width: 0; }
+
+.cc-name-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.cc-symbol {
+  font-size: clamp(18px, 2.8cqi, 22px); font-weight: 700; line-height: 1.2; letter-spacing: -.01em;
+  text-decoration: none; overflow-wrap: anywhere;
+}
+a.cc-symbol:hover { text-decoration: underline; text-underline-offset: 4px; }
+.cc-name { color: var(--bts-grey); font-size: 15px; overflow-wrap: anywhere; }
+.cc-tag {
+  display: inline-block; padding: 3px 8px; border: 1px solid var(--bts-edge); border-radius: 999px;
+  font-size: 11px; font-weight: 600; line-height: 1.1; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--bts-grey); white-space: nowrap;
+}
+.cc-tag.is-yours { background: var(--bts-fg); border-color: var(--bts-fg); color: #000; }
+.cc-tag.is-official { border-color: var(--bts-fg); color: var(--bts-fg); }
+/* hidden characters shown as a grey '·', look-alike letters underlined */
+.cc-odd { background: none; color: inherit; }
+.cc-odd-hidden { color: var(--bts-grey); padding: 0 .06em; }
+.cc-odd-lookalike { text-decoration: underline dotted var(--bts-grey); text-underline-offset: 3px; }
+
+.cc-main > .cc-addr { margin-top: 6px; }
+.cc-when { margin: 8px 0 0; font-size: 14px; line-height: 1.45; color: var(--bts-grey); }
+.cc-rel { color: var(--bts-fg); }
+.cc-rel::before { content: "·"; margin: 0 .5em 0 .2em; color: var(--bts-grey); }
+.cc-link { text-decoration: underline; text-decoration-color: var(--bts-edge); text-underline-offset: 3px; }
+.cc-link:hover { text-decoration-color: currentColor; }
+.cc-when .cc-link { color: var(--bts-grey); }
+.cc-when .cc-link:hover { color: var(--bts-fg); }
+
+.cc-facts {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 20px;
+  margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--bts-line);
+}
+.cc-fact { min-width: 0; }
+.cc-fact dt { margin: 0 0 4px; font-size: 12px; line-height: 1.2; color: var(--bts-grey); }
+.cc-fact dd {
+  margin: 0; font-size: 16px; font-weight: 600; line-height: 1.25;
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+.cc-unknown { color: var(--bts-grey); font-weight: 500; }
+
+.cc-flags { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
+.cc-flag { display: flex; align-items: baseline; gap: 10px; font-size: 14px; line-height: 1.45; }
+.cc-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--cc-dim); transform: translateY(-1px); }
+.cc-flag.is-warn .cc-dot { background: var(--bts-coin); }
+.cc-flag-body { min-width: 0; overflow-wrap: anywhere; }
+.cc-flag-label { font-weight: 700; }
+.cc-flag-text { color: #c4c4c4; }
+.cc-flag.is-info .cc-flag-text { color: var(--bts-grey); }
+.cc-proof {
+  color: var(--bts-grey); font-size: 12px; white-space: nowrap;
+  text-decoration: underline; text-decoration-color: var(--bts-edge); text-underline-offset: 3px;
+}
+.cc-proof:hover { color: var(--bts-fg); text-decoration-color: currentColor; }
+
+/* ---- quiet copies (collapsed) ------------------------------------------------------------------------------ */
+.cc-quiet { margin-top: 14px; border-top: 1px solid var(--bts-line); }
+.cc-quiet > summary, .cc-how > summary {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
+  padding: 14px 0 4px; list-style: none; cursor: pointer;
+}
+.cc-quiet > summary::-webkit-details-marker, .cc-how > summary::-webkit-details-marker { display: none; }
+.cc-quiet > summary::before, .cc-how > summary::before {
+  content: "+"; flex: none; width: 1em; font-weight: 600; color: var(--bts-grey);
+}
+.cc-quiet[open] > summary::before, .cc-how[open] > summary::before { content: "−"; }
+.cc-quiet-label { font-size: 15px; font-weight: 600; }
+.cc-quiet-hint { font-size: 13px; color: var(--bts-grey); }
+.cc-quiet > summary:focus-visible, .cc-how > summary:focus-visible,
+.cc-tool:focus-visible, .cc-card a:focus-visible { outline: 2px solid var(--bts-fg); outline-offset: 2px; border-radius: 4px; }
+.cc-quiet .cc-timeline { margin-top: 8px; }
+
+/* ---- notes and footer ----------------------------------------------------------------------------------- */
+.cc-notes, .cc-caveats {
+  display: grid; gap: 6px; margin: 20px 0 0; padding: 0; list-style: none;
+  font-size: 14px; line-height: 1.5; color: var(--bts-grey); overflow-wrap: anywhere;
+}
+.cc-foot { margin-top: clamp(22px, 4cqi, 30px); padding-top: clamp(16px, 3cqi, 22px); border-top: 1px solid var(--bts-line); }
+.cc-indexing { margin: 0; font-size: 14px; line-height: 1.5; }
+.cc-caveats { margin-top: 10px; font-size: 13px; }
+.cc-indexing + .cc-caveats { margin-top: 12px; }
+.cc-foot > :first-child { margin-top: 0; }
+.cc-how { margin-top: 12px; }
+.cc-how > summary { font-size: 14px; font-weight: 600; padding-top: 6px; }
+.cc-how p { margin: 8px 0 0 calc(1em + 12px); max-width: 64ch; font-size: 14px; line-height: 1.55; color: #c4c4c4; }
+.cc-asof { margin: 16px 0 0; font-size: 12px; color: var(--bts-grey); }
+
+/* ---- phones (narrow cards) ---------------------------------------------------------------------------- */
+@container bts-card (max-width: 620px) {
+  .cc-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container bts-card (max-width: 520px) {
+  .cc-row { grid-template-columns: 16px minmax(0, 1fr); gap: 0 10px; padding: 14px 10px 16px 2px; }
+  .cc-row::before { left: 9px; }
+  .cc-addr.is-full .cc-addr-full { display: none; }
+  .cc-addr.is-full .cc-addr-short { display: inline; }
+  .cc-official .cc-addr.is-full .cc-addr-full { display: inline; }
+  .cc-official .cc-addr.is-full .cc-addr-short { display: none; }
+  .cc-official { padding: 12px 14px; }
+  .cc-tool { min-height: 36px; padding: 0 13px; }
+  .cc-when .cc-rel { display: block; }
+  .cc-rel::before { content: none; }
+  .cc-flag { font-size: 13.5px; }
+}
+
+/* ---- reduced motion: no fades or slides ------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .cc-card, .cc-card * { animation: none !important; transition: none !important; }
+}

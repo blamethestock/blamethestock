@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Copy check preview · Blame the Stock (dev)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<link rel="stylesheet" href="../../site/src/ui/card.css">
+<link rel="stylesheet" href="../../site/src/ui/trust.css">
+<style>
+  :root {
+    --bg: #000; --fg: #fff; --grey: #8b8b8b; --line: #262626;
+    --pair: #2433FF; --coin: #FF4F1F; --radius: 20px;
+    --font: "Archivo", "Arial Narrow", Arial, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #000; color: #fff; font-family: var(--font); font-size: 16px; }
+  .bar {
+    position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+    padding: 12px 16px; background: rgba(0,0,0,.92); border-bottom: 1px solid #262626; font-size: 13px;
+  }
+  .bar h1 { margin: 0 12px 0 0; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+  .bar label { color: #8b8b8b; display: inline-flex; gap: 6px; align-items: center; }
+  .bar select { font: inherit; color: #fff; background: #111; border: 1px solid #333; border-radius: 999px; padding: 6px 12px; }
+  main { padding: 8px 16px 120px; }
+  .row { padding: 28px 0; border-bottom: 1px solid #1a1a1a; }
+  .row-head { margin-bottom: 14px; }
+  .row-head h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+  .row-head p { margin: 4px 0 0; color: #8b8b8b; font-size: 13px; }
+  .frames { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .frame { flex: none; max-width: 100%; }
+  .frame-desk { width: 920px; }
+  .frame-phone { width: 375px; padding: 0 16px; outline: 1px dashed #222; }
+  .frame-cap { font-size: 11px; color: #555; margin: 0 0 6px; letter-spacing: .08em; text-transform: uppercase; }
+  /* each frame behaves like the page's #copies mount */
+  .frame .mount { width: 100%; }
+  body[data-layout="desktop"] .frame-phone { display: none; }
+  body[data-layout="phone"] .frame-desk { display: none; }
+  body[data-layout="phone"] main { padding-left: 0; padding-right: 0; }
+  body[data-layout="phone"] .row-head { padding: 0 16px; }
+  body[data-layout="phone"] .frame-phone, body[data-layout="phone"] .frame-desk { width: 100%; max-width: 375px; outline: 0; }
+  .warn { margin: 16px; padding: 12px 16px; border: 1px solid #FF4F1F; border-radius: 12px; }
+</style>
+</head>
+<body data-layout="both">
+  <div class="bar">
+    <h1>Copy check preview</h1>
+    <label>Layout
+      <select id="layout">
+        <option value="both">Desktop + phone</option>
+        <option value="desktop">Desktop only</option>
+        <option value="phone">Phone only</option>
+      </select>
+    </label>
+    <label>Show
+      <select id="filter">
+        <option value="all">Everything</option>
+        <option value="obsyn">OBSYN (recorded)</option>
+        <option value="blame">Official $BLAME</option>
+        <option value="other">Empty, loading, errors</option>
+      </select>
+    </label>
+  </div>
+  <main id="list"></main>
+
+<script type="module">
+// OBSYN rows are the real copy check (api/src/copies.js) replayed from answers recorded once from Robinhood Chain
+// and Blockscout (dev/tests/fixtures/obsyn). The $BLAME rows are MADE-UP sample facts (the coin isn't live yet),
+// run through the same route and flag rules with an official list holding a stand-in address.
+import { SETTINGS } from '../../site/settings.js';
+import { renderCopies, renderCopiesLoading } from '../../site/src/ui/copycheck-card.js';
+import { loadFixture, runScenario, fixtureIndex, OBSYN } from '../tests/fixtures/obsyn/replay.js';
+import { copyCheck } from '../../api/src/copies.js';
+import { normalizeRow } from '../../site/src/trust/facts.js';
+import { FACTORY_ADDRESSES } from '../../api/src/env.js';
+import { tokenUrl, addressUrl, txUrl } from '../../site/src/trust/rules.js';
+
+const list = document.getElementById('list');
+const qs = new URLSearchParams(location.search);
+for (const [id, key] of [['layout', 'layout'], ['filter', 'show']]) {
+  const sel = document.getElementById(id);
+  if (qs.get(key)) sel.value = qs.get(key);
+}
+const apply = () => {
+  document.body.dataset.layout = document.getElementById('layout').value;
+  const f = document.getElementById('filter').value;
+  for (const r of list.querySelectorAll('.row')) r.hidden = f !== 'all' && r.dataset.group !== f;
+};
+document.getElementById('layout').addEventListener('change', apply);
+document.getElementById('filter').addEventListener('change', apply);
+
+function row(group, title, note, draw) {
+  const sec = document.createElement('section');
+  sec.className = 'row';
+  sec.dataset.group = group;
+  const head = document.createElement('div');
+  head.className = 'row-head';
+  const h2 = document.createElement('h2'); h2.textContent = title;
+  const p = document.createElement('p'); p.textContent = note;
+  head.append(h2, p);
+  const frames = document.createElement('div');
+  frames.className = 'frames';
+  for (const [cls, cap] of [['frame-desk', 'Desktop (920px card)'], ['frame-phone', 'Phone (375px screen)']]) {
+    const f = document.createElement('div');
+    f.className = 'frame ' + cls;
+    const c = document.createElement('p'); c.className = 'frame-cap'; c.textContent = cap;
+    const m = document.createElement('div'); m.className = 'mount';
+    f.append(c, m);
+    frames.append(f);
+    draw(m);
+  }
+  sec.append(head, frames);
+  list.append(sec);
+}
+
+// ---- recorded OBSYN -------------------------------------------------------------------------------------
+const noSleep = async () => {};
+let fx = null;
+try { fx = await loadFixture(); } catch (e) {
+  list.insertAdjacentHTML('beforebegin', '<p class="warn">Could not load the recorded OBSYN answers.</p>');
+}
+const obsyn = {};
+if (fx) {
+  for (const [key, query] of [['copy', OBSYN.copy], ['real', OBSYN.real], ['ticker', 'OBSYN'], ['early', OBSYN.early]]) {
+    obsyn[key] = await runScenario({ query }, fx);
+  }
+}
+
+// ---- made-up $BLAME sample ------------------------------------------------------------------------------
+const BLAME = '0x00000000000000000000000000000000000b1a3e';
+const T0 = 1794990000;
+const ad = (n) => '0x' + n.toString(16).padStart(40, '0');
+const tx = (n) => '0x' + n.toString(16).padStart(64, '0');
+const isoOf = (s) => new Date(s * 1000).toISOString().replace('.000Z', 'Z');
+function tinyChain({ head = 117000000, time = T0 + 36 * 3600 } = {}) {
+  const res = (status, body) => ({ ok: status < 300, status, headers: { get: () => 'application/json' }, json: async () => body, text: async () => JSON.stringify(body) });
+  return async (url, init) => {
+    if (String(url).startsWith('https://robinhoodchain.blockscout.com')) return res(404, {});
+    const body = JSON.parse(init.body);
+    const out = (Array.isArray(body) ? body : [body]).map((c) => {
+      let result = '0x';
+      if (c.method === 'eth_getBlockByNumber') result = { number: '0x' + head.toString(16), timestamp: '0x' + time.toString(16), hash: '0x1' };
+      if (c.method === 'eth_getLogs') result = [];
+      return { jsonrpc: '2.0', id: c.id, result };
+    });
+    return res(200, Array.isArray(body) ? out : out[0]);
+  };
+}
+const ROWS = [
+  { n: 0, symbol: 'BLAME', name: 'Blame the Stock', dt: 0 },
+  { n: 1, symbol: '$BLАME', name: 'Blame the Stock', dt: -480 },          // Cyrillic А
+  { n: 2, symbol: 'B⁠LAME', name: 'Blame', dt: 2 * 3600 },                 // hidden word joiner
+  { n: 3, symbol: 'BLAM', name: 'Blam', dt: 5 * 3600 },                         // near match
+  { n: 4, symbol: 'BLAME', name: 'BLAME', dt: 26 * 3600 },
+];
+const blameRow = (r) => ({ token: r.n === 0 ? BLAME : ad(0xb1a3e000 + r.n), factory: FACTORY_ADDRESSES[0], curve: ad(0xc0e0 + r.n),
+  creator: ad(0xde70 + r.n), tx_from: ad(0xde70 + r.n), pair_token: '0x0000000000000000000000000000000000000000',
+  block: 117000000 - 300000 + r.n * 1000 + Math.round(r.dt * 10), log_index: 0, time: T0 + r.dt, tx: tx(0x1a00 + r.n), name: r.name, symbol: r.symbol });
+const FACTS = {   // made up
+  0: { holders: 1240, usd: 48200, src: 'pool', grad: 3 * 3600, buy: [0.5, 2.1], trades: 40 },
+  1: { holders: 3, usd: 0.4, src: 'curve', buy: [0.02, 1.1], sold: 40, claim: [90, 0.031], bridge: [150, 0.052], trades: 0 },
+  2: { holders: 9, usd: 120, src: 'curve', buy: [0.01, 0.6], trades: 2 },
+  3: { holders: 2, usd: 30, src: 'curve', buy: [0.01, 0.6], trades: 0 },
+  4: { holders: 1, usd: 6, src: 'curve', buy: [0.03, 1.6], sold: 300, trades: 0 },
+};
+const gather = async (raw) => {
+  const r = normalizeRow(raw);
+  const n = ROWS.find((x) => blameRow(x).token === r.token).n, f = FACTS[n];
+  const at = (dt) => isoOf(r.time + dt);
+  return {
+    address: r.token, name: r.name, symbol: r.symbol, factory: r.factory, curve: r.curve,
+    launch: { tx: r.tx, block: r.block, time: isoOf(r.time) }, creator: r.creator,
+    devBuy: { eth: f.buy[0], tokens: f.buy[1] * 1e7, pctSupply: f.buy[1], tx: r.tx },
+    devSold: f.sold ? { pctOfDevBuy: 100, firstSellSecondsAfterLaunch: f.sold, tx: tx(0x5e11 + n), sells: [{ tx: tx(0x5e11 + n), time: at(f.sold), tokens: f.buy[1] * 1e7, pctOfDevBuy: 100 }] } : null,
+    fees: { claimedEth: f.claim ? f.claim[1] : 0, unclaimedEth: 0, claims: f.claim ? [{ tx: tx(0xfee0 + n), time: at(f.claim[0]), eth: f.claim[1] }] : [] },
+    bridges: f.bridge ? [{ via: 'MetaBridge/Relay', eth: f.bridge[1], time: at(f.bridge[0]), tx: tx(0xb10e + n) }] : [],
+    holders: { count: f.holders, source: 'blockscout' },
+    liquidity: { quote: f.usd / 3000, quoteSymbol: 'ETH', usd: f.usd, source: f.src },
+    graduated: f.grad ? { time: at(f.grad), tx: tx(0x6a0 + n) } : null,
+    snipers: [], tradesRecent: f.trades, missing: [],
+    proof: { token: tokenUrl(r.token), creator: addressUrl(r.creator), launchTx: txUrl(r.tx) },
+  };
+};
+const OFFICIAL = { trust: { ...SETTINGS.trust, official: [{ symbol: 'BLAME', address: BLAME }] } };
+const route = (query, rows, { settings = OFFICIAL, oldestBlock = 20000000 } = {}) => {
+  const db = fixtureIndex(rows, { lastBlock: 117000000, lastRun: T0 + 36 * 3600, oldestBlock });
+  return copyCheck({ query, db, fetch: tinyChain(), settings, now: (T0 + 36 * 3600) * 1000, gather, sleep: noSleep });
+};
+const blameRows = ROWS.map(blameRow);
+const blame = {
+  ticker: await route('$BLAME', blameRows),
+  copy: await route(blameRows[1].token, blameRows),
+  official: await route(BLAME, blameRows),
+  empty: await route('ZQXJ', [], { settings: null, oldestBlock: 110000000 }),
+};
+// Every error code the API can send, with no message (the card's own words from settings.js are used).
+const errors = ['bad-input', 'not-found', 'index-behind', 'rpc-failed', 'explorer-unavailable'];
+
+// ---- draw ------------------------------------------------------------------------------------------------
+const show = (res) => (m) => renderCopies(m, res, SETTINGS);
+if (fx) {
+  row('obsyn', 'Pasted: the OBSYN copycat 0x7a2a…475e', 'Recorded from Robinhood Chain (head block 117,273,262). The pasted coin is highlighted.', show(obsyn.copy));
+  row('obsyn', 'Pasted: the OBSYN that graduated 0x5d99…4351', 'Recorded. No warning flags on the pasted coin.', show(obsyn.real));
+  row('obsyn', 'Ticker search: OBSYN', 'Recorded. A ticker shows the copy check only (no blame card).', show(obsyn.ticker));
+  row('obsyn', 'Pasted: the 09:08 OBSYN 0x0188…4503', 'Recorded.', show(obsyn.early));
+}
+row('blame', 'Official $BLAME: ticker search', 'MADE-UP sample facts; stand-in official address. Cyrillic А and a hidden word joiner shown.', show(blame.ticker));
+row('blame', 'Official $BLAME: a copy pasted', 'MADE-UP sample facts.', show(blame.copy));
+row('blame', 'Official $BLAME: the official one pasted', 'MADE-UP sample facts.', show(blame.official));
+row('other', 'Empty result, index still filling', 'A ticker no Pons coin uses; older launches still being indexed.', show(blame.empty));
+row('other', 'Loading', 'While the API answers.', (m) => renderCopiesLoading(m, SETTINGS));
+row('other', 'API unreachable', 'One grey line; the blame card above is never held up.', (m) => renderCopies(m, null, SETTINGS));
+for (const code of errors) row('other', 'Error: ' + code, 'ErrorResult from the API.', (m) => renderCopies(m, { ok: false, code, message: '' }, SETTINGS));
+apply();
+document.body.dataset.ready = '1';
+</script>
+</body>
+</html>

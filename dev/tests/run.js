@@ -15,6 +15,9 @@ import './markethours.test.js'; // off-hours mode calendar
 import './offhours.test.js';    // off-hours mode (switched off by default)
 import './board.test.js';       // Stock-Paired Board (switched off by default)
 import './ui.test.js';          // page behaviour: deep links, focus, board row clicks, errors
+import './indexer.test.js';     // launch indexer
+import './copycheck.test.js';   // fake-copy logic (OBSYN fixtures)
+import './copycard.test.js';    // copy-check card
 // =================== END OF TEST FILES ================
 
 const inBrowser = typeof document !== 'undefined';   // note: browsers also have a print() (it prints the page)

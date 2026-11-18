@@ -38,6 +38,7 @@
 
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="src/ui/card.css">
+  <link rel="stylesheet" href="src/ui/trust.css">
   <!-- The Stock-Paired Board's stylesheet (src/features/board.css) is added by src/ui/page.js only when the board is on. -->
 
   <!-- Tiny early switch (kept in its own file so the safety rules can forbid code written into the page). -->
@@ -93,11 +94,15 @@
           <span class="examples-label">Try</span>
         </div>
         <p class="hero-note">Free. No wallet. No sign-up.</p>
+        <p class="hero-trust">Read-only. We never ask you to connect a wallet, sign or approve anything.</p>
       </div>
     </section>
 
     <!-- 3. Result card (filled by src/app.js + src/ui/card.js) -->
     <section id="result" aria-live="polite"></section>
+
+    <!-- 3b. Copy check, "Is this the real one?" (filled by src/app.js + src/ui/copycheck-card.js from our API) -->
+    <section id="copies" aria-live="polite" aria-label="Is this the real one?"></section>
 
     <!-- 4. How it works: the three steps, and one example card that fills in as they go.
          Wide screens: the panel stays put while you scroll; the steps light up one by one and the card adds
@@ -211,9 +216,10 @@
   <!-- 8. Footer -->
   <footer class="footer" id="site-footer">
     <p class="footer-mark" aria-hidden="true" data-fit="0.995"><span class="fit-text" id="footer-mark"></span></p>
+    <p class="footer-trust">Read-only. We never ask you to connect a wallet, sign or approve anything.</p>
     <ul class="footer-notes">
       <li>Not affiliated with Robinhood, Pons or any company named on this site.</li>
-      <li>Not financial advice.</li>
+      <li>Facts from Robinhood Chain; not financial advice.</li>
       <li>Prices can be delayed or wrong.</li>
       <li>Prices read directly from Robinhood Chain. Pool lists from DexScreener and GeckoTerminal.</li>
     </ul>

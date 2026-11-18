@@ -1,0 +1,39 @@
+# Blame the Stock API Worker. PREPARED ONLY: nothing here has been deployed.
+# Deploy steps (after Node.js is installed and `npx wrangler login` is done by the owner):
+#   1. npx wrangler d1 create bts            -> paste the printed database_id below
+#   2. npx wrangler d1 execute bts --remote --file=api/schema.sql
+#   3. npx wrangler deploy --config api/wrangler.toml
+# The custom domain needs blamethestock.com to be an active zone in the same Cloudflare account.
+
+name = "bts-api"
+main = "src/worker.js"            # written by the API builder; it calls runIndexer() from src/indexer.js on cron
+compatibility_date = "2026-11-01"
+workers_dev = false               # only reachable on the custom domain
+
+routes = [
+  { pattern = "api.blamethestock.com", custom_domain = true }
+]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bts"
+database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+
+# The minute indexer: reads new TokenLaunched events and name()/symbol() into D1.
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+# The official $BLAME address, set on launch day (must match site/settings.js token.contractAddress).
+OFFICIAL = ""
+
+# Logs: Workers Logs on, but request logs keep no visitor IPs or user agents.
+# invocation_logs = false stops the automatic per-request log line (it carries request metadata);
+# the Worker's own console.log lines (indexer progress) are kept and never include visitor data.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+invocation_logs = false

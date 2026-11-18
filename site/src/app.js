@@ -37,6 +37,7 @@ function setUrl(address, w) {
   try {
     const u = new URL(location.href);
     if (address) u.searchParams.set('ca', address); else u.searchParams.delete('ca');
+    u.searchParams.delete('q');
     u.searchParams.set('w', w);
     history.replaceState(history.state, '', u.pathname + u.search + u.hash);
   } catch (e) { /* file:// or locked-down browsers: the link still works from Copy link */ }
@@ -92,6 +93,7 @@ export async function lookup(raw, win, { scroll = true } = {}) {
     shown = { address: null, window: w };
     busy(false);
     setUrl(null, w);
+    copies(null);
     const err = toError({ ok: false, code: 'bad-address' });
     if (hint(err.message)) clearCard(out);
     else renderError(out, err, { onAnother: focusInput });
@@ -101,6 +103,7 @@ export async function lookup(raw, win, { scroll = true } = {}) {
 
   shown = { address, window: w };
   setUrl(address, w);
+  copies(address);                               // its own card under this one; never holds this one up
   busy(true);
   const view = { coin: address, window: w };
   renderLoading(out, FIRST_STEP, view);
@@ -175,9 +178,78 @@ async function showOffHours(out, priceInput, result, my) {
   renderOffHours(out, view && view.ok ? view : { ok: false, text: W.unavailable });
 }
 
+// ---- Copy check, "Is this the real one?" (settings.trust) ---------------------------------------
+// Its own card in #copies, under the blame card, from our API. It loads on its own and never holds up or breaks
+// the blame card: if the API can't be reached it says so in one grey line.
+let copySeq = 0;
+let copyFor = null;                             // the query on screen (or on its way), so tab switches don't re-ask
+const copiesOn = () => !!(SETTINGS.trust && SETTINGS.trust.enabled !== false && SETTINGS.trust.apiBase && $('copies'));
+
+// A ticker: one word (no spaces), not starting with 0x, up to 32 characters, with a letter or number in it.
+export function tickerOf(entry) {
+  const s = typeof entry === 'string' ? entry.trim() : '';
+  if (!s || s.length > 32 || /\s/.test(s) || /^0x/i.test(s)) return null;
+  return /[\p{L}\p{N}]/u.test(s) ? s : null;
+}
+
+// query: an address or a ticker; null clears the card. reveal: called once the card's place is drawn.
+function copies(query, { reveal: show = null } = {}) {
+  const out = $('copies');
+  if (!out || !copiesOn()) return;
+  if (!query) { copySeq++; copyFor = null; out.textContent = ''; return; }
+  if (query === copyFor) return;
+  const my = ++copySeq;
+  copyFor = query;
+  const live = () => my === copySeq;
+  import('./ui/copycheck-card.js').then(async (card) => {
+    if (!live()) return;
+    card.renderCopiesLoading(out, SETTINGS);
+    if (show) show(out);
+    const res = await card.fetchCopies(query, SETTINGS);
+    if (!live()) return;
+    if (!res || res.ok !== true) copyFor = null;   // the next lookup of the same coin asks again
+    card.renderCopies(out, res, SETTINGS);
+    if (show) show(out);                         // a ticker search: bring the finished card into view
+  }).catch(() => {
+    if (!live()) return;
+    copyFor = null;
+    const p = document.createElement('p');
+    p.className = 'cc-line';
+    p.textContent = (SETTINGS.trust.wording && SETTINGS.trust.wording.unavailable) || 'Copy check unavailable right now.';
+    out.textContent = '';
+    out.append(p);
+  });
+}
+
+// A ticker in the box (or ?q=): the copy check only, no blame card.
+function tickerLookup(ticker, { scroll = true } = {}) {
+  ++seq;                                        // a blame lookup still running may no longer draw
+  shown = { address: null, window: shown.window };
+  busy(false);
+  hint('');
+  const out = $('result');
+  if (out) clearCard(out);
+  try {
+    const u = new URL(location.href);
+    u.searchParams.delete('ca');
+    u.searchParams.set('q', ticker);
+    history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+  } catch (e) { /* the card still shows */ }
+  copyFor = null;                               // a ticker asked again is asked again
+  const show = scroll === true ? reveal
+    : scroll === 'if-untouched' ? (o) => { if (untouched()) reveal(o); } : null;   // a shared link: not if they got busy
+  copies(ticker, { reveal: show });
+}
+
 function submitFromInput({ blur = true } = {}) {
   const input = $('ca-input');
   if (!input) return;
+  const ticker = validateAddress(input.value) ? null : tickerOf(input.value);
+  if (ticker && copiesOn()) {
+    if (blur && coarsePointer()) input.blur();
+    tickerLookup(ticker, { scroll: true });
+    return;
+  }
   // Close the phone keyboard so the card can be seen (not when the entry isn't an address: they'll fix it).
   if (blur && coarsePointer() && validateAddress(input.value)) input.blur();
   lookup(input.value, shown.window, { scroll: true });
@@ -241,6 +313,10 @@ export function boot() {
     const input = $('ca-input');
     if (input) input.value = ca.trim();
     lookup(ca, shown.window, { scroll: 'if-untouched' });
+  } else if (tickerOf(params.get('q')) && copiesOn()) {
+    const input = $('ca-input');
+    if (input) input.value = params.get('q').trim();
+    tickerLookup(tickerOf(params.get('q')), { scroll: 'if-untouched' });
   }
 }
 

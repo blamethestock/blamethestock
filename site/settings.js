@@ -46,6 +46,86 @@ export const SETTINGS = {
     stockBoard: false,      // after launch: the Stock-Paired Board
   },
 
+  // ---- Copy check: the "Is this the real one?" card -------------------
+  // It asks our small API (below) for every Pons coin with the same name and shows what the chain says
+  // about each one. If the API can't be reached, the card shows one grey line and the rest of the site works.
+  trust: {
+    enabled: true,          // false = no copy check card at all
+    apiBase: "https://api.blamethestock.com",   // no slash at the end
+
+    // The official coins. Empty until launch day. On launch day it gets one entry:
+    //   official: [{ symbol: "BLAME", address: "0x…" }],   <- the same address as token.contractAddress above
+    // (The API's OFFICIAL setting must hold the same address.)
+    official: [],
+
+    // When a flag goes up. (The API uses the same numbers; change both together.)
+    launchedJustBeforeMinutes: 60,   // same name, launched this many minutes (or less) before the other coin
+    devDumpPct: 90,                  // dev sold at least this % of their launch buy...
+    devDumpMinutes: 10,              // ...within this many minutes of launch
+    feesAndLeftMinutes: 60,          // dev claimed fees AND bridged ETH out, both this soon after launch
+    deadCopyUsd: 500,                // "quiet copy": never graduated and less than this many dollars left...
+    deadCopyQuietMinutes: 60,        // ...and no trades for this many minutes (owner to decide: 60, or 1440 = 24 h)
+    sameSnipersMin: 3,               // this many of the same first buyers on two coins
+    sniperWindowBlocks: 48,          // "first buyers" = in the first 48 blocks (about 5 seconds)
+
+    // Words on the card. {curly brackets} are filled in automatically.
+    wording: {
+      title: "Is this the real one?",
+      checking: "Looking for coins with the same name…",
+      unavailable: "Copy check unavailable right now.",
+      official: "Official {symbol}",
+      copy: "Copy",
+      copied: "Copied",
+      copyFailed: "Couldn't copy",
+      explorer: "Explorer",
+      yours: "Yours",
+      officialTag: "Official",
+      near: "Similar name",
+      launched: "Launched {time}",
+      beforeYours: "{gap} before yours",
+      afterYours: "{gap} after yours",
+      sameAsYours: "same minute as yours",
+      beforeOfficial: "{gap} before the official one",
+      afterOfficial: "{gap} after the official one",
+      holders: "Holders",
+      liquidity: "Money in it",
+      underOneDollar: "under $1",
+      graduated: "Graduated",
+      graduatedYes: "Yes, {time}",
+      graduatedNo: "Not yet",
+      dev: "Dev",
+      unknown: "can't read",
+      quietOne: "1 quiet copy",
+      quietMany: "{count} quiet copies",
+      quietHint: "Never graduated, almost no money left and no recent trades.",
+      indexing: "Searching Pons launches since {date}.",
+      asOf: "Chain data as of {time}",
+      proof: "proof",
+      howTitle: "How we got this",
+      how: [
+        "We list every Pons launch with the same name, after removing hidden characters and look-alike letters (so U·S·DG, ＵＳＤＧ and USDG count as one name).",
+        "Then we read each coin's launch, dev wallet, trades, fee claims and bridge transfers from Robinhood Chain.",
+        "Flags are patterns we observed in those facts. They're not proof of who made a coin, and we can't link wallets that were funded through exchanges or other bridges.",
+        "Every number links to the explorer, so you can check it yourself.",
+      ],
+      flags: {
+        "launched-just-before": "Launched just before",
+        "dev-dumped-fast": "Dev sold fast",
+        "fees-and-left": "Took fees and left",
+        "dead-copy": "Quiet copy",
+        "same-snipers": "Same first buyers",
+        "name-of-official": "Uses the official name",
+      },
+      errors: {
+        "bad-input": "Paste a ticker or a coin address.",
+        "not-found": "We couldn't find a coin at this address on Robinhood Chain.",
+        "index-behind": "Our list of Pons launches is catching up. Try again in a few minutes.",
+        "rpc-failed": "Robinhood Chain didn't answer. Try again in a moment.",
+        "explorer-unavailable": "The explorer didn't answer. Try again in a moment.",
+      },
+    },
+  },
+
   // ---- Stock-Paired Board (shows when stockBoard above is true) ------
   board: {
     window: "24h",          // the time window it opens on: "1h", "6h", "24h" or "7d"
