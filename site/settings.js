@@ -95,6 +95,8 @@ export const SETTINGS = {
       graduatedNo: "Not yet",
       dev: "Dev",
       unknown: "can't read",
+      reading: "reading…",
+      readingCoins: "Reading coin {n} of {total} from Robinhood Chain…",
       quietOne: "1 quiet copy",
       quietMany: "{count} quiet copies",
       quietHint: "Never graduated, almost no money left and no recent trades.",
@@ -104,7 +106,7 @@ export const SETTINGS = {
       howTitle: "How we got this",
       how: [
         "We list every Pons launch with the same name, after removing hidden characters and look-alike letters (so U·S·DG, ＵＳＤＧ and USDG count as one name).",
-        "Then we read each coin's launch, dev wallet, trades, fee claims and bridge transfers from Robinhood Chain.",
+        "Then your browser reads each coin's launch, dev wallet, trades, fee claims and bridge transfers straight from Robinhood Chain.",
         "Flags are patterns we observed in those facts. They're not proof of who made a coin, and we can't link wallets that were funded through exchanges or other bridges.",
         "Every number links to the explorer, so you can check it yourself.",
       ],

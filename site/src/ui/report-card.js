@@ -1,10 +1,11 @@
-// Blame the Stock: the launch report card. Shows a ReportResult from our API (api/src/report.js) in #report, under
-// the copy check, and then the wallet links (api/src/links.js), which load separately once the report is drawn.
-// Loaded by app.js only when it is needed.
+// Blame the Stock: the launch report card. Shows a ReportResult in #report, under the copy check, and then the wallet
+// links, which load separately once the report is drawn. Both are read from Robinhood Chain in the visitor's browser
+// (../trust/local.js runs the report steps of report-build.js and wallet-links.js); our API only gives the coin's
+// launch row from its index. Loaded by app.js only when it is needed.
 //
-//   fetchReport(token, settings, { fetch }) / fetchLinks(...) -> checked answer | null (API unreachable or unknown)
-//   loadReport(token, settings, { fetch, sleep, live, onProgress, maxWaitMs })  polls while the API says 'building'
-//   loadLinks(token, settings, { fetch, sleep, live, onProgress, maxWaitMs })   the same for the wallet links
+//   fetchBasics(token, settings, { fetch }) -> the API's launch row | null (unreachable, unknown or not indexed)
+//   loadReport(token, settings, { fetch, sleep, live, onProgress, maxWaitMs })  builds it here, with progress
+//   loadLinks(token, settings, { sleep, live })                                 the wallet links, after the report
 //   reportView(report, settings, { timeZone }) / linksView(links, report, settings, { timeZone })  -> plain objects
 //                                                 holding every string and link the card shows (no DOM)
 //   linkedVerdict(report, links)                  the verdict line once the links are in ("No dev link found.")
@@ -12,7 +13,7 @@
 //   renderLinks(card, linksOrState, report, settings, { onRetry, timeZone })
 //   showReport(el, token, settings, { fetch, sleep, live, timeZone })  the whole flow: report, then links
 //
-// Everything from the API is treated as data: text goes in with textContent only, and every link is rebuilt here
+// Everything from the API and the chain is treated as data: text goes in with textContent only, and every link is rebuilt here
 // from an address or transaction hash that has been checked (or must match the explorer's own URL pattern), so a
 // bad answer can't point a link anywhere else. Never advice: we say what was observed, and what we can't link.
 import { SETTINGS } from '../../settings.js';
@@ -20,6 +21,7 @@ import { fill } from '../core/format.js';
 import { duration, ethAmount } from '../trust/rules.js';
 import { buildVerdict, linkSentence } from '../trust/report-rules.js';
 import { tokenUrl, addressUrl, txUrl, shortAddr, when, apiBaseOf } from './copycheck-card.js';
+import { buildReportLocal, buildLinksLocal } from '../trust/local.js';
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/;
 const HASH = /^0x[0-9a-fA-F]{64}$/;
@@ -27,7 +29,7 @@ const PROOF = /^https:\/\/robinhoodchain\.blockscout\.com\/(tx|address|token)\/(
 const TIMEOUT_MS = 25000;
 const MAX_TEXT = 400;
 const MAX_SYMBOL = 32;
-export const MAX_WAIT_MS = 180000;     // stop polling a report that is still building after 3 minutes
+export const MAX_WAIT_MS = 300000;     // stop building a report that still isn't done after 5 minutes
 export const POLL_MIN_S = 1.5;
 export const POLL_MAX_S = 10;
 const MAX_SNIPER_ROWS = 10;            // first buyers listed straight away; the rest behind "Show N more"
@@ -136,7 +138,10 @@ export function words(settings = SETTINGS) {
 
 const apiBase = (settings) => apiBaseOf(settings);   // https only (or a Worker on this machine, local dev)
 
-// ---- the API ----------------------------------------------------------------------------------------------
+// ---- the API and the local build ---------------------------------------------------------------------------
+// Our API gives only the coin's launch row from its index (GET /v1/report/{token}, status 'basics'): the official
+// Robinhood Chain RPC refuses Cloudflare's network, so the report and the wallet links are read from the chain
+// here, in the visitor's browser (../trust/local.js, the same step code the API used to run).
 async function getJson(url, { fetch: f = globalThis.fetch, timeoutMs = TIMEOUT_MS } = {}) {
   if (typeof f !== 'function') return null;
   const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
@@ -180,42 +185,64 @@ export function checkLinks(body) {
   if (body.ok === false) return { ok: true, status: 'unavailable' };   // any error: the card offers a retry
   return null;
 }
-
-export async function fetchReport(token, settings = SETTINGS, opts = {}) {
-  const base = apiBase(settings);
-  if (!base || !isAddr(token)) return null;
-  return checkReport(await getJson(base + '/v1/report/' + lower(token), opts));
+// The API's launch basics: only a launch row for this very coin, with a real transaction hash and block, gets through.
+export function checkBasics(body, token) {
+  if (!body || typeof body !== 'object' || body.ok !== true || body.status !== 'basics') return null;
+  const r = body.launch;
+  if (!r || typeof r !== 'object' || !isAddr(r.token) || lower(r.token) !== lower(token)) return null;
+  if (!isHash(r.tx) || !Number.isInteger(Number(r.block)) || !isAddr(r.curve)) return null;
+  const pick = {};
+  for (const k of ['token', 'factory', 'curve', 'creator', 'tx_from', 'pair_token', 'tx']) pick[k] = r[k] == null ? null : lower(r[k]);
+  pick.block = Number(r.block);
+  pick.log_index = Number.isFinite(Number(r.log_index)) ? Number(r.log_index) : 0;
+  pick.time = Number.isFinite(Number(r.time)) && r.time != null ? Number(r.time) : null;
+  pick.name = typeof r.name === 'string' ? r.name.slice(0, 200) : null;
+  pick.symbol = typeof r.symbol === 'string' ? r.symbol.slice(0, 200) : null;
+  return { ok: true, status: 'basics', launch: pick };
 }
-export async function fetchLinks(token, settings = SETTINGS, opts = {}) {
+
+export const BASICS_TIMEOUT_MS = 8000;   // the launch row only: don't hold the report up for long (it can read it itself)
+export async function fetchBasics(token, settings = SETTINGS, opts = {}) {
   const base = apiBase(settings);
   if (!base || !isAddr(token)) return null;
-  return checkLinks(await getJson(base + '/v1/report/' + lower(token) + '/links', opts));
+  return checkBasics(await getJson(base + '/v1/report/' + lower(token), { timeoutMs: BASICS_TIMEOUT_MS, ...opts }), token);
 }
 
 const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Asks again while the API says 'building' (it builds the report in small steps between calls).
-// Returns the final answer, { ok:false, code:'still-building' } after maxWaitMs, null when unreachable, or
-// undefined when live() turned false (a newer lookup took over).
-async function poll(fetchOnce, { sleep = realSleep, live = () => true, onProgress = null, maxWaitMs = MAX_WAIT_MS } = {}) {
-  let waited = 0;
-  for (;;) {
-    const res = await fetchOnce();
-    if (!live()) return undefined;
-    if (!res || res.status !== 'building') return res;
-    if (onProgress) onProgress(res.progress);
-    const ms = res.retryAfterSeconds * 1000;
-    if (waited + ms > maxWaitMs) return { ok: false, code: 'still-building' };
-    await sleep(ms);
-    waited += ms;
-    if (!live()) return undefined;
+// The launch report, built here. opts: { fetch (our API), live, onProgress(0..1), sleep, maxWaitMs, buildReport }
+// (buildReport replaces the local builder; tests). Returns the report, an error, { ok:false, code:'still-building' }
+// after maxWaitMs, or undefined when live() turned false (a newer lookup took over).
+export async function loadReport(token, settings = SETTINGS, opts = {}) {
+  const { live = () => true, onProgress = null, sleep = realSleep, maxWaitMs = MAX_WAIT_MS } = opts;
+  if (!isAddr(token)) return { ok: false, code: 'bad-address', message: '' };
+  const basics = await fetchBasics(token, settings, opts);       // null is fine: the launch is read from the chain
+  if (!live()) return undefined;
+  const build = opts.buildReport || buildReportLocal;
+  const started = Date.now();
+  const stillLive = () => live() && Date.now() - started <= maxWaitMs;
+  let res;
+  try {
+    res = await build(lower(token), { settings, basics, live: stillLive, onProgress: (p) => { if (live() && onProgress) onProgress(progressOf(p)); }, sleep });
+  } catch (e) {
+    res = null;
   }
+  if (!live()) return undefined;
+  if (res === undefined) return { ok: false, code: 'still-building' };
+  const ok = checkReport(res);
+  if (ok && ok.status === 'building') return { ok: false, code: 'still-building' };
+  return ok;
 }
-export function loadReport(token, settings = SETTINGS, opts = {}) {
-  return poll(() => fetchReport(token, settings, opts), opts);
-}
-export function loadLinks(token, settings = SETTINGS, opts = {}) {
-  return poll(() => fetchLinks(token, settings, opts), opts);
+
+// The wallet links, checked here after the report is drawn. Same opts (buildLinks replaces the local builder).
+export async function loadLinks(token, settings = SETTINGS, opts = {}) {
+  const { live = () => true, onProgress = null, sleep = realSleep } = opts;
+  const build = opts.buildLinks || buildLinksLocal;
+  let res;
+  try { res = await build(lower(token), { settings, live, onProgress, sleep }); } catch (e) { res = null; }
+  if (!live()) return undefined;
+  const ok = checkLinks(res);
+  return ok && ok.status === 'building' ? { ok: true, status: 'unavailable' } : ok;
 }
 
 // ---- numbers ---------------------------------------------------------------------------------------------

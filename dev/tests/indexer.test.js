@@ -9,6 +9,7 @@ import { RPC } from '../../site/src/data/constants.js';
 import { skeleton } from '../../site/src/trust/skeleton.js';
 import * as IX from '../../api/src/indexer.js';
 import * as E from '../../api/src/env.js';
+import * as SF from '../../site/src/trust/factories.js';
 
 suite('indexer');
 
@@ -80,8 +81,11 @@ function aggResult(items) {
 // ---- mock chain ----------------------------------------------------------------------------------
 // rows: table rows the chain should produce. opts: head, cap (logs per answer), drpcDown (archive eth_call
 // always says "Unknown state"), blind (Set of tokens a 'latest' node can't see yet), failTimes.
+// Cloudflare-like options: official429 (the official node answers HTTP 429 to everything), drpcLogsDown (dRPC's
+// eth_getLogs fails), drpcLogsFailFrom (dRPC's eth_getLogs fails from this block on), avoid (rpc.js avoid list).
+// dRPC behaves like its free plan: eth_getLogs over more than 101 blocks and batches over 3 calls are refused.
 function mockChain(rows, opts = {}) {
-  const o = { cap: 10000, drpcDown: false, blind: new Set(), failTimes: false, ...opts };
+  const o = { cap: 10000, drpcDown: false, blind: new Set(), failTimes: false, official429: false, drpcLogsDown: false, drpcLogsFailFrom: null, ...opts };
   const logs = rows.map(launchLog);
   const byToken = new Map(rows.map((r) => [r.token, r]));
   const timeByBlock = new Map(rows.map((r) => [r.block, r.time]));
@@ -99,6 +103,8 @@ function mockChain(rows, opts = {}) {
       const f = params[0];
       const a = parseInt(f.fromBlock, 16), b = parseInt(f.toBlock, 16);
       const many = Array.isArray(f.address);
+      if (ep === 'drpc' && (o.drpcLogsDown || (o.drpcLogsFailFrom != null && b >= o.drpcLogsFailFrom))) fail('upstream unavailable');
+      if (ep === 'drpc' && b - a > 100) fail('ranges over 100 blocks are not supported on free plan', 35);
       if (b - a > (many ? 99999 : 9999999)) fail('query spans ' + (b - a + 1) + ' blocks, but only 100000 are allowed', -32602);
       const addrs = new Set(many ? f.address : [f.address]);
       const hit = logs.filter((l) => addrs.has(l.address) && l.topics[0] === f.topics[0]
@@ -126,10 +132,17 @@ function mockChain(rows, opts = {}) {
     }
     fail('mock: unsupported ' + method);
   }
+  const requests = [];
   const fetch = async (url, init) => {
     const ep = Object.keys(RPC).find((k) => RPC[k].url === url);
     const body = JSON.parse(init.body);
     const list = Array.isArray(body) ? body : [body];
+    requests.push({ ep, methods: list.map((x) => x.method) });
+    if (ep === 'official' && o.official429) return { ok: false, status: 429, json: async () => ({ message: 'rate limited' }) };
+    if (ep === 'drpc' && list.length > 3) {
+      const out = list.map((req) => ({ jsonrpc: '2.0', id: req.id, error: { code: 31, message: 'Batch of more than 3 requests are not allowed on free plan' } }));
+      return { ok: true, status: 200, json: async () => out };
+    }
     const out = list.map((req) => {
       calls.push({ ep, method: req.method, params: req.params });
       try { return { jsonrpc: '2.0', id: req.id, result: handle(ep, req.method, req.params) }; } catch (e) {
@@ -138,9 +151,9 @@ function mockChain(rows, opts = {}) {
     });
     return { ok: true, status: 200, json: async () => (Array.isArray(body) ? out : out[0]) };
   };
-  _setTransport({ fetch, sleep: async () => {}, backoff: [0], timeouts: false });
+  _setTransport({ fetch, sleep: async () => {}, backoff: [0], timeouts: false, avoid: o.avoid });
   clearChainCaches();
-  return { calls, setOpt: (k, v) => { o[k] = v; } };
+  return { calls, requests, setOpt: (k, v) => { o[k] = v; } };
 }
 
 // ---- fake D1 -------------------------------------------------------------------------------------
@@ -513,6 +526,107 @@ test('runIndexer: chain failure mid-run throws and leaves the cursor where it wa
   ok(err, 'throws');
   eq(db.meta.get('last_block'), '77999999');
   eq(db.launches.size, 0, 'nothing half written');
+});
+
+// ---- the API Worker's cron: dRPC in 100-block pieces (the official node refuses Cloudflare) ----------------
+const WORKER = { logSpan: 100, maxLogRequests: 22, maxRows: 15, maxBlocks: 6600 };      // worker.js INDEXER_*
+
+test('chunked (Worker): dRPC in <=100-block pieces, 3 per request, the official node never asked; same rows as the default', async () => {
+  const rows = synth(7, 79000000, 300);
+  const head = 79002200 + E.CONFIRMATIONS;
+  const chain = mockChain(rows, { head, official429: true, avoid: ['official'] });
+  const db = fakeDB();
+  const r = await IX.runIndexer({ DB: db }, { fromBlock: 79000000, ...WORKER });       // head read from the chain
+  eq(r.head, head);
+  eq([r.from, r.to, r.written], [79000000, 79002200, 7]);
+  const gl = chain.calls.filter((c) => c.method === 'eth_getLogs');
+  ok(gl.every((c) => c.ep === 'drpc'), 'logs from dRPC only');
+  ok(gl.every((c) => parseInt(c.params[0].toBlock, 16) - parseInt(c.params[0].fromBlock, 16) <= 99), 'pieces of at most 100 blocks');
+  eq(gl.length, 23, '2,201 blocks = 23 pieces');
+  eq(r.logRequests, 8, '3 pieces per request');
+  ok(chain.requests.every((q) => q.ep !== 'drpc' || q.methods.length <= 3), 'dRPC batches of at most 3');
+  eq(chain.requests.filter((q) => q.ep === 'official').length, 0, 'the official node is never asked when the others answer');
+  for (const row of rows) eq(pick(db.launches.get(row.token), BASE_COLS), pick(row, BASE_COLS), row.token);
+  eq(db.meta.get('last_block'), '79002200');
+});
+
+test('chunked (Worker): a long gap (the cron stuck since 20:37) is caught up over a few runs, each under 40 subrequests', async () => {
+  const gap = 21000;                                     // ~36 minutes of chain
+  const rows = synth(21, 80000000, 1000);
+  const head = 80000000 + gap + E.CONFIRMATIONS;
+  const chain = mockChain(rows, { head, official429: true, avoid: ['official'] });
+  const db = fakeDB();
+  db.meta.set('last_block', '79999999');
+  db.meta.set('oldest_block', '20000000');
+  const perRun = [];
+  for (let i = 0; i < 10; i++) {
+    const before = chain.requests.length;
+    const r = await IX.runIndexer({ DB: db }, { ...WORKER });
+    perRun.push(chain.requests.length - before);
+    if (r.upToDate) break;
+    ok(r.to - r.from + 1 <= WORKER.maxBlocks, 'at most ' + WORKER.maxBlocks + ' blocks a run');
+  }
+  ok(perRun.every((n) => n <= 40), 'subrequests per run: ' + perRun.join(', '));
+  eq(perRun.length, 5, '4 runs to catch up 21,000 blocks, then up to date');
+  eq(db.meta.get('last_block'), String(80000000 + gap));
+  eq(db.launches.size, 21, 'every launch in the gap, none twice');
+  for (const row of rows) eq(db.launches.get(row.token).time, row.time);
+  ok(chain.calls.filter((c) => c.method === 'eth_getLogs').every((c) => c.ep === 'drpc'));
+});
+
+test('chunked (Worker): many launches stop the scan early and the run ends at a block edge (maxRows)', async () => {
+  const rows = synth(40, 81000000, 20);                  // 40 launches in 800 blocks
+  const chain = mockChain(rows, { head: 81005000, official429: true, avoid: ['official'] });
+  const db = fakeDB();
+  const r = await IX.runIndexer({ DB: db }, { fromBlock: 81000000, ...WORKER, head: 81005000 });
+  eq(r.written, 15);
+  eq(r.to, 81000299, 'the end of the batch that brought the 15th launch');
+  eq(r.logRequests, 1, 'stopped reading once 15 launches were seen');
+  ok(chain.requests.length <= 12, String(chain.requests.length));
+  const r2 = await IX.runIndexer({ DB: db }, { ...WORKER, head: 81005000 });
+  eq(r2.from, 81000300);
+  eq(r2.written, 15);
+});
+
+test('chunked (Worker): dRPC down -> the official node as a last resort; both down mid-run -> stop at the last piece read', async () => {
+  const rows = synth(5, 82000000, 100);
+  let chain = mockChain(rows, { head: 82001000, drpcLogsDown: true, avoid: ['official'] });
+  let db = fakeDB();
+  let r = await IX.runIndexer({ DB: db }, { fromBlock: 82000000, ...WORKER, head: 82001000 });
+  eq(r.written, 5);
+  ok(chain.calls.some((c) => c.method === 'eth_getLogs' && c.ep === 'official'), 'official asked after dRPC failed');
+  // dRPC fails from block 82000350 on and the official node refuses: the run keeps the pieces before it
+  chain = mockChain(rows, { head: 82001000, drpcLogsFailFrom: 82000350, official429: true, avoid: ['official'] });
+  db = fakeDB();
+  db.meta.set('last_block', '81999999');
+  r = await IX.runIndexer({ DB: db }, { ...WORKER, head: 82001000 });
+  eq(r.to, 82000299, 'the last whole batch before the failing one');
+  eq(db.meta.get('last_block'), '82000299');
+  eq(db.launches.size, 3);
+  // nothing readable at all: throws, the cursor stays
+  chain = mockChain(rows, { head: 82001000, drpcLogsDown: true, official429: true, avoid: ['official'] });
+  db = fakeDB();
+  db.meta.set('last_block', '81999999');
+  let err = null;
+  try { await IX.runIndexer({ DB: db }, { ...WORKER, head: 82001000 }); } catch (e) { err = e; }
+  ok(err, 'throws');
+  eq(db.meta.get('last_block'), '81999999');
+});
+
+test('chunked (Worker): names from dRPC (archive, Multicall3 aggregate3), block times from dRPC', async () => {
+  const rows = synth(3, 83000000, 50);
+  const chain = mockChain(rows, { head: 83001000, official429: true, avoid: ['official'] });
+  const db = fakeDB();
+  await IX.runIndexer({ DB: db }, { fromBlock: 83000000, ...WORKER, head: 83001000 });
+  const calls = chain.calls.filter((c) => c.method === 'eth_call');
+  ok(calls.length >= 1 && calls.every((c) => c.ep === 'drpc' && c.params[1] !== 'latest'), 'archive reads on dRPC');
+  ok(chain.calls.filter((c) => c.method === 'eth_getBlockByNumber').every((c) => c.ep === 'drpc'), 'block times on dRPC');
+  eq([...db.launches.values()].map((x) => x.symbol), ['C0', 'C1', 'C2']);
+});
+
+test('the browser\'s factory list and floor are the same as the indexer\'s (site/src/trust/factories.js = api/src/env.js)', () => {
+  eq(SF.FACTORY_ADDRESSES, E.FACTORY_ADDRESSES);
+  eq(SF.INDEX_FLOOR, E.INDEX_FLOOR);
 });
 
 test('runIndexer: needs a DB binding', async () => {

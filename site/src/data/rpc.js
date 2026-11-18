@@ -7,17 +7,22 @@ let sleepFn = (ms) => new Promise((r) => setTimeout(r, ms));
 let backoffMs = [400, 800, 1600];
 let useTimeouts = true;
 let pageUrl = null;            // tests: stands in for location.href (serverTime)
+let avoid = [];                // endpoints asked last, always (the API Worker: the official node 429s Cloudflare)
 
-// Tests swap the network out: _setTransport({ fetch, sleep, backoff, timeouts: false, pageUrl })
+// Tests swap the network out: _setTransport({ fetch, sleep, backoff, timeouts: false, pageUrl, avoid })
 // (also forgets which endpoints were cooling, so one test's outage doesn't steer the next).
-export function _setTransport({ fetch: f, sleep, backoff, timeouts, pageUrl: page } = {}) {
+// avoid: endpoint names every fallback order asks last (a last resort), until the next _setTransport. The API
+// Worker passes ['official']: that node answers HTTP 429 to every call from Cloudflare's network.
+export function _setTransport({ fetch: f, sleep, backoff, timeouts, pageUrl: page, avoid: av } = {}) {
   if (f) fetchFn = f;
   if (sleep) sleepFn = sleep;
   if (backoff) backoffMs = backoff;
   if (timeouts !== undefined) useTimeouts = !!timeouts;
   if (page !== undefined) pageUrl = page;
+  avoid = Array.isArray(av) ? av.slice() : [];
   resetHealth();
 }
+export const avoided = (name) => avoid.includes(name);
 
 // ---- endpoint health ---------------------------------------------------------------------------
 // After a timeout or a network error (the official node's 429 also looks like one in a browser) an endpoint
@@ -27,10 +32,12 @@ const coolUntil = {};
 export function resetHealth() { for (const k of Object.keys(coolUntil)) delete coolUntil[k]; }
 export function markCooling(name) { coolUntil[name] = Date.now() + COOL_MS; }
 export function isCooling(name) { return (coolUntil[name] || 0) > Date.now(); }
-// Same order, cooling endpoints moved to the end. Items are names or [name, tries] pairs.
+// Same order, cooling endpoints moved to the end, avoided ones after those. Items are names or [name, tries] pairs.
 export function byHealth(list) {
-  const cool = (x) => isCooling(Array.isArray(x) ? x[0] : x);
-  return list.filter((x) => !cool(x)).concat(list.filter(cool));
+  const name = (x) => (Array.isArray(x) ? x[0] : x);
+  const av = (x) => avoid.includes(name(x));
+  const cool = (x) => !av(x) && isCooling(name(x));
+  return list.filter((x) => !av(x) && !cool(x)).concat(list.filter(cool), list.filter(av));
 }
 
 // eth_getLogs has no other source than the official node: wait longer between tries (a 429 burst passes).

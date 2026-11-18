@@ -6,7 +6,9 @@ import { copyView, fetchCopies, checkAnswer, errorText, relative, when, words, s
 import { tickerOf, devApi } from '../../site/src/app.js';
 import { SETTINGS } from '../../site/settings.js';
 import { TRUST_DEFAULTS, trustSettings, CAVEATS } from '../../site/src/trust/rules.js';
-import { loadFixture, runScenario, OBSYN } from './fixtures/obsyn/replay.js';
+import { loadFixture, runScenario, replayFetch, fixtureIndex, OBSYN } from './fixtures/obsyn/replay.js';
+import { copyMatches } from '../../api/src/copies.js';
+import { _setTransport } from '../../site/src/data/rpc.js';
 
 suite('copy check › card');
 
@@ -120,7 +122,7 @@ test('index still filling: one "Searching Pons launches since" line, not the sam
   eq([v.rows, v.quiet], [[], []]);
   eq(v.how.title, 'How we got this');
   ok(v.how.items.some((s) => /removing hidden characters and look-alike letters/.test(s)));
-  ok(v.how.items.some((s) => /launch, dev wallet, trades, fee claims and bridge transfers from Robinhood Chain/.test(s)));
+  ok(v.how.items.some((s) => /launch, dev wallet, trades, fee claims and bridge transfers straight from Robinhood Chain/.test(s)));
   eq(v.asOf, 'Chain data as of Nov 18, 3:46 AM EST');
 });
 
@@ -223,23 +225,85 @@ test('safety rules: the API is allowed to be fetched, and nothing else changed (
   const csp = h.split('\n').find((l) => /Content-Security-Policy:/.test(l));
   const part = (name) => (csp.match(new RegExp(name + ' ([^;]*)')) || [])[1];
   ok(part('connect-src').split(' ').includes('https://api.blamethestock.com'));
+  // every host the browser now reads from: the three RPC nodes, the explorer (copy check facts, launch report,
+  // wallet links), the two pool-search services and our API
+  const hosts = ['https://rpc.mainnet.chain.robinhood.com', 'https://robinhood-rpc.publicnode.com', 'https://robinhood.drpc.org',
+    'https://robinhoodchain.blockscout.com', 'https://api.dexscreener.com', 'https://api.geckoterminal.com', 'https://api.blamethestock.com'];
+  eq(part('connect-src').split(' ').filter((x) => x !== "'self'").sort(), hosts.slice().sort());
   eq(part('script-src'), "'self'");
   eq(part('default-src'), "'self'");
   ok(!part('img-src').includes('blamethestock'));
 });
 
-test('loadCopies polls while the API says building (a name with several coins), then gives the answer', async () => {
-  const good = result([match(1)]);
-  const answers = [[202, { ok: true, status: 'building', progress: 0.5, retryAfterSeconds: 2 }], [200, good]];
-  const f = async () => { const [status, body] = answers.shift(); return { status, ok: status < 300, json: async () => body }; };
+test('loadCopies: the list from our API, then each coin read in the browser, rows filling in; the same answer as one big run', async () => {
+  const fx = await loadFixture();
+  const direct = JSON.parse(JSON.stringify(await obsyn('ticker', 'OBSYN')));
+  const head = fx.index.head;
+  const index = fixtureIndex(fx.index.rows, { lastBlock: head.number, lastRun: head.time });
+  const listing = { ...(await copyMatches({ query: 'OBSYN', db: index, now: head.time * 1000 })), status: 'done' };
+  // an older API that still says 'building' is asked again first
+  const answers = [[202, { ok: true, status: 'building', progress: 0.5, retryAfterSeconds: 2 }], [200, listing]];
+  const f = async () => { const [status, body] = answers.shift(); return { status, ok: status < 300, json: async () => JSON.parse(JSON.stringify(body)) }; };
+  const chain = replayFetch(fx);
+  _setTransport({ fetch: chain, sleep: async () => {}, backoff: [0], timeouts: false });
   const waits = [], seen = [];
-  eq(await loadCopies('OBSYN', SETTINGS, { fetch: f, sleep: async (ms) => { waits.push(ms); }, onProgress: (p) => seen.push(p) }), good);
-  eq([waits, seen], [[2000], [0.5]]);
+  const res = await loadCopies('OBSYN', SETTINGS, { fetch: f, chainFetch: chain, sleep: async (ms) => { waits.push(ms); }, onProgress: (p) => seen.push(JSON.parse(JSON.stringify(p))) });
+  eq(JSON.stringify(res), JSON.stringify(direct));
+  eq(waits.slice(0, 1), [2000]);
+  eq(seen.map((p) => p.reading), [0, 1, 2, 3, 4].map((done) => ({ done, total: 4 })));
+  eq(seen[0].matches.filter((m) => m.pending).length, 4, 'every row drawn at once, facts still to come');
+  const v0 = copyView(seen[0], SETTINGS, NY);
+  eq(v0.reading, 'Reading coin 1 of 4 from Robinhood Chain…');
+  ok(allRows(v0).every((r) => r.pending && r.facts.every((x) => x.text === 'reading…' && x.url === null)), 'pending facts say "reading…" and link nowhere');
+  const v2 = copyView(seen[2], SETTINGS, NY);
+  eq(v2.reading, 'Reading coin 3 of 4 from Robinhood Chain…');
+  eq(allRows(v2).filter((r) => !r.pending).length, 2);
+  eq(copyView(seen[4], SETTINGS, NY).reading, null, 'all read: no progress line');
   eq(checkAnswer({ ok: true, status: 'building', progress: 7, retryAfterSeconds: 999 }), { ok: true, status: 'building', progress: 1, retryAfterSeconds: 10 });
   // still building after maxWaitMs: unavailable (null); a newer lookup took over: undefined
   const always = async () => ({ status: 202, ok: true, json: async () => ({ ok: true, status: 'building', progress: 0.1, retryAfterSeconds: 2 }) });
   eq(await loadCopies('OBSYN', SETTINGS, { fetch: always, sleep: async () => {}, maxWaitMs: 5000 }), null);
   eq(await loadCopies('OBSYN', SETTINGS, { fetch: always, sleep: async () => {}, live: () => false }), undefined);
+  // the API's own error passes through; the chain is never asked
+  eq((await loadCopies('X', SETTINGS, { fetch: async () => ({ status: 503, json: async () => ({ ok: false, code: 'index-behind', message: 'm' }) }) })).code, 'index-behind');
+});
+
+test('loadCopies: an address the index doesn\'t have: name and symbol read from the chain, then the API is asked again with them', async () => {
+  const fx = await loadFixture();
+  const head = fx.index.head;
+  const index = fixtureIndex(fx.index.rows, { lastBlock: head.number, lastRun: head.time });
+  const OTHER = '0x00000000000000000000000000000000000000aa';     // a token that isn't a Pons launch, named Obsyn/OBSYN
+  const abi = (t) => { let h = ''; for (const ch of t) h += ch.charCodeAt(0).toString(16).padStart(2, '0'); return '0x' + (32).toString(16).padStart(64, '0') + t.length.toString(16).padStart(64, '0') + h.padEnd(64, '0'); };
+  const replay = replayFetch(fx);
+  const chain = async (url, init) => {
+    if (!String(url).startsWith('https://robinhoodchain.blockscout.com') && init && init.body && init.body.includes(OTHER.slice(2))) {
+      const body = JSON.parse(init.body);
+      const list = (Array.isArray(body) ? body : [body]).map((c) => {
+        const data = c.params && c.params[0] && c.params[0].data;
+        const result = data === '0x06fdde03' ? abi('Obsyn') : data === '0x95d89b41' ? abi('OBSYN') : '0x';
+        return { jsonrpc: '2.0', id: c.id, result };
+      });
+      const out = Array.isArray(body) ? list : list[0];
+      return { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => out, text: async () => JSON.stringify(out) };
+    }
+    return replay(url, init);
+  };
+  const urls = [];
+  const f = async (url) => {
+    urls.push(url);
+    const m = /q=([^&]*)(?:&name=([^&]*)&symbol=([^&]*))?/.exec(url);
+    const hint = m[2] != null ? { name: decodeURIComponent(m[2]), symbol: decodeURIComponent(m[3]) } : null;
+    const body = await copyMatches({ query: decodeURIComponent(m[1]), db: index, now: head.time * 1000, hint });
+    return { status: 200, json: async () => ({ ...body, status: 'done' }) };
+  };
+  _setTransport({ fetch: chain, sleep: async () => {}, backoff: [0], timeouts: false });
+  const res = await loadCopies(OTHER, SETTINGS, { fetch: f, chainFetch: chain, sleep: async () => {} });
+  eq(urls.length, 2, JSON.stringify(res).slice(0, 300));
+  ok(/&name=Obsyn&symbol=OBSYN$/.test(urls[1]), urls[1]);
+  eq(res.matches.length, 4);
+  eq([res.query.isPons, res.query.symbol], [false, 'OBSYN']);
+  ok(res.notes.some((n) => /wasn't launched on Pons/.test(n)), JSON.stringify(res.notes));
+  ok(res.matches.every((m) => !m.isQuery && m.missing.length === 0), 'the four Pons OBSYNs read in full');
 });
 
 test('local development: ?dev-api= is honoured only on a page served from this machine, and only for a local Worker', () => {

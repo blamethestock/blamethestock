@@ -1,8 +1,12 @@
-// Blame the Stock: the copy check card ("Is this the real one?"). Shows a CopyCheckResult from our API
-// (api/src/copies.js) in #copies, under the blame card. Loaded by app.js only when it is needed.
+// Blame the Stock: the copy check card ("Is this the real one?") in #copies, under the blame card. Our API lists the
+// same-name Pons launches from its index (api/src/copies.js); the chain facts of each coin are then read here, in the
+// visitor's browser, two coins at a time (../trust/copycheck.js), and the rows fill in as they arrive.
+// Loaded by app.js only when it is needed.
 //
-//   fetchCopies(query, settings, { fetch }) -> CopyCheckResult | { ok:false, code, message } | building | null (unreachable)
-//   loadCopies(query, settings, { fetch, sleep, live, onProgress, maxWaitMs })  polls while the API says 'building'
+//   fetchCopies(query, settings, { fetch, hint }) -> listing | { ok:false, code, message } | building | null (unreachable)
+//   loadCopies(query, settings, { fetch, sleep, live, onProgress, maxWaitMs })  the list, then the chain facts:
+//       onProgress(partial) with status 'reading' and reading { done, total } after each coin; the final
+//       CopyCheckResult is returned
 //   copyView(result, settings, { timeZone }) -> plain object with every string and link the card shows (no DOM)
 //   renderCopiesLoading(el, settings, progress) / renderCopies(el, resultOrErrorOrNull, settings, { timeZone })
 //
@@ -11,6 +15,7 @@
 import { SETTINGS } from '../../settings.js';
 import { fill, usd } from '../core/format.js';
 import { duration, markSegments } from '../trust/rules.js';
+import { runCopyCheck } from '../trust/copycheck.js';
 
 export const EXPLORER = 'https://robinhoodchain.blockscout.com';
 const ADDR = /^0x[0-9a-fA-F]{40}$/;
@@ -46,7 +51,8 @@ const WORDS = {
   beforeOfficial: '{gap} before the official one', afterOfficial: '{gap} after the official one',
   holders: 'Holders', liquidity: 'Money in it', underOneDollar: 'under $1',
   graduated: 'Graduated', graduatedYes: 'Yes, {time}', graduatedNo: 'Not yet',
-  dev: 'Dev', unknown: "can't read",
+  dev: 'Dev', unknown: "can't read", reading: 'reading…',
+  readingCoins: 'Reading coin {n} of {total} from Robinhood Chain…',
   quietOne: '1 quiet copy', quietMany: '{count} quiet copies',
   quietHint: 'Never graduated, almost no money left and no recent trades.',
   indexing: 'Searching Pons launches since {date}.',
@@ -55,7 +61,7 @@ const WORDS = {
   howTitle: 'How we got this',
   how: [
     'We list every Pons launch with the same name, after removing hidden characters and look-alike letters.',
-    "Then we read each coin's launch, dev wallet, trades, fee claims and bridge transfers from Robinhood Chain.",
+    "Then your browser reads each coin's launch, dev wallet, trades, fee claims and bridge transfers straight from Robinhood Chain.",
   ],
   flags: {
     'launched-just-before': 'Launched just before', 'dev-dumped-fast': 'Dev sold fast',
@@ -85,14 +91,16 @@ export function apiBaseOf(settings = SETTINGS) {
 // GET {apiBase}/v1/copies?q=… . Returns the result, an error the API explained, { ok:true, status:'building' } while
 // the API is still reading the coins (see loadCopies), or null when the API couldn't be reached or answered
 // something we don't understand (the card then shows one grey line).
-export async function fetchCopies(query, settings = SETTINGS, { fetch: f = globalThis.fetch, timeoutMs = TIMEOUT_MS } = {}) {
+export async function fetchCopies(query, settings = SETTINGS, { fetch: f = globalThis.fetch, timeoutMs = TIMEOUT_MS, hint = null } = {}) {
   const base = apiBaseOf(settings);
   const q = String(query == null ? '' : query).trim().slice(0, 100);
   if (!base || !q || typeof f !== 'function') return null;
+  // hint: the name and symbol of an address the index doesn't have yet, read from the chain here (search words only)
+  const extra = hint ? '&name=' + encodeURIComponent(String(hint.name || '').slice(0, 100)) + '&symbol=' + encodeURIComponent(String(hint.symbol || '').slice(0, 100)) : '';
   const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
   const timer = ctrl && typeof setTimeout === 'function' ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
-    const res = await f(base + '/v1/copies?q=' + encodeURIComponent(q), {
+    const res = await f(base + '/v1/copies?q=' + encodeURIComponent(q) + extra, {
       method: 'GET', headers: { Accept: 'application/json' }, credentials: 'omit',
       ...(ctrl ? { signal: ctrl.signal } : {}),
     });
@@ -122,23 +130,48 @@ export function checkAnswer(body) {
   return null;
 }
 
-// Asks again while the API says 'building' (a name with several coins is read over a few calls).
-// Returns the final answer, null when unreachable or still building after maxWaitMs, or undefined when live()
-// turned false (a newer lookup took over).
-export async function loadCopies(query, settings = SETTINGS, opts = {}) {
-  const { sleep = (ms) => new Promise((r) => setTimeout(r, ms)), live = () => true, onProgress = null, maxWaitMs = 120000 } = opts;
+// The list from our API. An older API that still answers 'building' is asked again until it has its list.
+// -> listing | error | null (unreachable or still building after maxWaitMs) | undefined (live() turned false)
+async function listFromApi(query, settings, opts, hint) {
+  const { sleep = (ms) => new Promise((r) => setTimeout(r, ms)), live = () => true, maxWaitMs = 120000 } = opts;
   let waited = 0;
   for (;;) {
-    const res = await fetchCopies(query, settings, opts);
+    const res = await fetchCopies(query, settings, { ...opts, hint });
     if (!live()) return undefined;
-    if (!res || res.status !== 'building') return res;
-    if (onProgress) onProgress(res.progress);
+    if (!res || res.status !== 'building') return res && res.ok === true ? asListing(res) : res;
     const ms = res.retryAfterSeconds * 1000;
     if (waited + ms > maxWaitMs) return null;
     await sleep(ms);
     waited += ms;
     if (!live()) return undefined;
   }
+}
+// An older API answered with its own (blank) facts: keep its list, drop its notes about what it couldn't read.
+function asListing(res) {
+  if (res.facts === 'client' || res.facts === 'pending') return res;
+  const notes = (Array.isArray(res.notes) ? res.notes : []).filter((n) => !/couldn't be read|left blank|explorer was unavailable|Showing the top/.test(String(n)));
+  return { ...res, notes };
+}
+
+// The list from our API, then each coin's chain facts read here (two at a time, the most relevant first).
+// opts: { fetch (our API), chainFetch (the explorer; default the page's fetch), sleep, live, onProgress(partial),
+//        maxWaitMs, gather, lanes }
+// Returns the CopyCheckResult, an error the API or the chain explained, null when the API couldn't be reached, or
+// undefined when live() turned false (a newer lookup took over).
+export async function loadCopies(query, settings = SETTINGS, opts = {}) {
+  const { live = () => true, onProgress = null } = opts;
+  let gone = false;
+  const api = async (q, hint) => {
+    const r = await listFromApi(q, settings, opts, hint);
+    if (r === undefined) gone = true;
+    return r === undefined ? null : r;
+  };
+  const res = await runCopyCheck(query, {
+    api, settings, live: () => !gone && live(), sleep: opts.sleep, lanes: opts.lanes, gather: opts.gather, fetch: opts.chainFetch || null,
+    onProgress: onProgress ? (p) => { if (live()) onProgress(p); } : null,
+  });
+  if (gone || !live()) return undefined;
+  return res;
 }
 
 // ---- times -----------------------------------------------------------------------------------------------
@@ -189,6 +222,8 @@ function money(liq, W) {
 
 function rowView(m, ref, refKind, W, tz) {
   const missing = Array.isArray(m.missing) ? m.missing : [];
+  const pending = m.pending === true;
+  const unknown = pending ? W.reading : W.unknown;
   const flags = (Array.isArray(m.flags) ? m.flags : []).filter((f) => f && typeof f.code === 'string').map((f) => ({
     code: f.code,
     severity: f.severity === 'warn' ? 'warn' : 'info',
@@ -222,14 +257,15 @@ function rowView(m, ref, refKind, W, tz) {
       url: txUrl(launch.tx),
       rel: ref && ref !== m && launch.time ? relative(launch.time, ref.launch && ref.launch.time, W, refKind) : null,
     },
+    pending,
     facts: [
-      { key: 'holders', label: W.holders, text: holders == null ? W.unknown : holders.toLocaleString('en-US'), url: holders == null ? null : tokenUrl(m.address) },
-      { key: 'liquidity', label: W.liquidity, text: money(m.liquidity, W),
+      { key: 'holders', label: W.holders, text: holders == null ? unknown : holders.toLocaleString('en-US'), url: holders == null ? null : tokenUrl(m.address) },
+      { key: 'liquidity', label: W.liquidity, text: pending ? unknown : money(m.liquidity, W),
         url: m.liquidity && num(m.liquidity.usd) != null ? (m.liquidity.source === 'curve' ? addressUrl(m.curve) : null) || tokenUrl(m.address) : null },
       { key: 'graduated', label: W.graduated,
-        text: g ? fill(W.graduatedYes, { time: when(g.time, tz) }) : gradKnown ? W.graduatedNo : W.unknown,
-        url: g ? txUrl(g.tx) : gradKnown ? addressUrl(m.curve) : null },
-      { key: 'dev', label: W.dev, text: isAddr(m.creator) ? shortAddr(m.creator) : W.unknown, url: addressUrl(m.creator) },
+        text: g ? fill(W.graduatedYes, { time: when(g.time, tz) }) : gradKnown && !pending ? W.graduatedNo : unknown,
+        url: g ? txUrl(g.tx) : gradKnown && !pending ? addressUrl(m.curve) : null },
+      { key: 'dev', label: W.dev, text: isAddr(m.creator) ? shortAddr(m.creator) : unknown, url: addressUrl(m.creator) },
     ],
     flags,
     time: secs(launch.time),
@@ -249,8 +285,13 @@ export function copyView(result, settings = SETTINGS, { timeZone } = {}) {
   const o = result.official && isAddr(result.official.address) ? result.official : null;
   const sym = o ? '$' + text(String(o.symbol || '').replace(/^\$/, ''), 20) : '';
   const indexing = result.indexComplete === false && result.indexedFrom ? fill(W.indexing, { date: day(result.indexedFrom, timeZone) }) : null;
+  const rd = result.status === 'reading' && result.reading && typeof result.reading === 'object' ? result.reading : null;
+  const total = rd && num(rd.total) != null ? rd.total : 0;
+  const reading = rd && total > 0 && rd.done < total
+    ? fill(W.readingCoins, { n: Math.min(total, (num(rd.done) || 0) + 1), total }) : null;
   return {
     title: W.title,
+    reading,
     query: result.query && result.query.kind === 'address' && isAddr(result.query.address)
       ? shortAddr(result.query.address)
       : '$' + text(String((result.query && result.query.input) || '').replace(/^\$/, ''), 32),
@@ -340,6 +381,7 @@ function rowEl(r, W) {
   if (r.isQuery) cls.push('is-query');
   if (r.isOfficial) cls.push('is-official');
   if (r.warn) cls.push('is-warn');
+  if (r.pending) cls.push('is-pending');
   return h('li', { class: cls.join(' '), 'data-address': r.address },
     h('span', { class: 'cc-node', 'aria-hidden': 'true' }),
     h('div', { class: 'cc-main' },
@@ -403,9 +445,10 @@ export function renderCopies(el, res, settings = SETTINGS, { timeZone } = {}) {
   }
   const view = copyView(res, settings, { timeZone });
   const W = view.words;
-  const c = card('result',
+  const c = card(view.reading ? 'reading' : 'result',
     head(view),
     h('p', { class: 'cc-verdict', text: view.verdict }),
+    view.reading ? h('p', { class: 'bts-progress cc-progress cc-reading', role: 'status', text: view.reading }) : null,
     view.official ? h('div', { class: 'cc-official' },
       h('span', { class: 'cc-badge', text: view.official.label }),
       addrTools(view.official.address, W, { full: true })) : null,
@@ -421,6 +464,10 @@ export function renderCopies(el, res, settings = SETTINGS, { timeZone } = {}) {
         h('summary', { text: view.how.title }),
         view.how.items.map((s) => h('p', { text: s }))),
       view.asOf ? h('p', { class: 'cc-asof', text: view.asOf }) : null));
+  if (view.reading) c.setAttribute('aria-busy', 'true');
+  // The rows fill in while the coins are read: draw over the card in place, without the entrance animation again.
+  const prev = el.firstElementChild;
+  if (prev && prev.classList && prev.classList.contains('cc-card') && prev.getAttribute('data-state') === 'reading') c.classList.remove('is-entering');
   swap(el, c);
   return c;
 }

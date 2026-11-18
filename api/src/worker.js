@@ -1,17 +1,20 @@
 // Blame the Stock API: the Cloudflare Worker at https://api.blamethestock.com. Read-only.
 //
 //   GET  /v1/health                    the launch index: last block, oldest block, indexed from, complete?
-//   GET  /v1/copies?q=OBSYN|0x…        copy check (api/src/copies.js)
-//   GET  /v1/report/{token}            launch report (api/src/report.js)
-//   GET  /v1/report/{token}/links      wallet links, loaded after the report (api/src/links.js)
+//   GET  /v1/copies?q=OBSYN|0x…        copy check: the same-name launches from the D1 index (api/src/copies.js)
+//   GET  /v1/report/{token}            the coin's launch basics from the D1 index (the report is built in the browser)
+//   GET  /v1/report/{token}/links      a note: wallet links are checked in the browser
 //   POST|GET|DELETE /mcp               MCP, Streamable HTTP (api/src/mcp.js)
-//   scheduled()                        every minute: the launch indexer, then queued report/link jobs
+//   scheduled()                        every minute: the launch indexer (dRPC in 100-block pieces)
+//
+// Chain reading happens where the visitor is. The official Robinhood Chain RPC answers HTTP 429 to every call from
+// Cloudflare's network, publicnode serves only the newest blocks and dRPC caps eth_getLogs at 100 blocks, so the
+// Worker answers from D1 only and marks it (facts: 'client'); the website reads the chain facts, the launch
+// report and the wallet links in the visitor's browser (site/src/trust/copycheck.js, site/src/trust/local.js),
+// and the local MCP package does the same on the user's machine. Only the cron indexer reads the chain here.
 //
 // Built for the Workers FREE plan: at most 50 subrequests (fetch, Cache API), 50 D1 queries and ~10 ms of CPU per
-// request. Every request and cron run gets a budget (api/src/budget.js) that counts what it spends. Heavy answers
-// are built in small persisted steps: a request does what fits, saves it in D1 and answers
-//   { ok: true, status: 'building', progress: 0..1 }   (HTTP 202, never cached)
-// and the client asks again in a couple of seconds. The cron also moves queued report/link jobs on.
+// request. Every request and cron run gets a budget (api/src/budget.js) that counts what it spends.
 //
 // Caching: finished answers go to the Cache API (this data centre) and to the D1 table api_cache (everywhere),
 // keyed only by the token or the query. Never by anything about the visitor.
@@ -22,12 +25,13 @@
 // The pure parts (URL parsing, CORS, rate limit, routing, caching rules, staging, jobs) take their platform
 // pieces as `deps`, so dev/tests/worker.test.js runs them in jsc with fakes.
 import { createBudget, DEFAULT_LIMIT, DEFAULT_D1_LIMIT } from './budget.js';
-import { copyCheck, d1Index } from './copies.js';
+import { copyMatches, d1Index } from './copies.js';
 import { runIndexer } from './indexer.js';
 import { INDEX_FLOOR } from './env.js';
 import { SETTINGS } from '../../site/settings.js';
 import { _setTransport, _setLaneScope } from '../../site/src/data/rpc.js';
-import { gatherFacts } from '../../site/src/trust/facts.js';
+import { iso as isoOf } from '../../site/src/trust/facts.js';
+import { tokenUrl, txUrl, addressUrl } from '../../site/src/trust/rules.js';
 
 const VERSION = '0.1.0';
 const DEFAULT_ORIGINS = ['https://blamethestock.com', 'https://www.blamethestock.com', 'http://localhost:8765'];
@@ -36,33 +40,25 @@ const RATE = { perMinute: 60, windowMs: 60000, maxKeys: 10000 };
 
 // Seconds a finished answer is kept (shared cache: Cache API + D1). Browsers keep it for BROWSER_SECONDS.
 const TTL = {
-  copies: 300,          // live facts (holders, liquidity, sells): 5 minutes
-  report: 120,          // launch report: 2 minutes here (report.js keeps its own 5-minute cache and refreshes it)
-  links: 21600,         // wallet links: who funded the first buyers doesn't change; 6 hours
-  facts: 300,           // one coin's facts inside a copy check that is being built
-  partialFacts: 60,     // a coin whose facts didn't fit even a whole request: kept as they are for a minute
+  copies: 60,           // the same-name launches from the index (a new launch can join them any minute)
+  report: 60,           // a coin's launch basics
 };
 const BROWSER_SECONDS = 60;
 const HEALTH_SECONDS = 15;
 
-// Staged copy check: one coin's full read takes about 16-20 subrequests (measured on the OBSYN fixtures).
-const FACT_RESERVE = 20;
-// A poll where no coin fitted although earlier polls read some (the search itself cost more this time, e.g. RPC
-// retries or the slower fallback node): answer 'building' again up to this many times before giving the partial
-// answer, so a passing slow-down doesn't turn into a half-blank result.
-const COPIES_STALLS = 3;
-const STALL_SECONDS = 120;
-
-// Queued report/link jobs, moved on by the cron.
-const JOBS = { perRun: 4, minRoom: 10, maxAttempts: 40, maxAgeSeconds: 1800 };
-
-// The cron: the indexer may use this many subrequests; the rest goes to queued jobs. A run reads at most
-// INDEXER_MAX_BLOCKS blocks (under 100k, so one eth_getLogs covers every factory) and writes at most
-// INDEXER_MAX_ROWS launches, so their block times fit a few batches (the official node takes 6 per batch).
-// A normal minute is ~575 blocks and ~0.5 launches; after an outage it catches up ~30 launches a minute.
-const INDEXER_SUBREQUESTS = 25;
-const INDEXER_MAX_BLOCKS = 50000;
-const INDEXER_MAX_ROWS = 30;
+// The cron: the indexer may use this many subrequests (of the 50 a run has). It reads TokenLaunched logs on dRPC in
+// INDEXER_LOG_SPAN-block pieces, 3 per batch request, at most INDEXER_LOG_REQUESTS requests (6,600 blocks, ~11 min of
+// chain), and writes at most INDEXER_MAX_ROWS launches; the rest of the share goes to the head block (1), the
+// Multicall3 senders and block times (3 per request, up to 5 each), names (1) and pending names (1).
+// A normal minute is ~575 blocks (2 requests) and ~0.5 launches; after an outage it catches up ~6,000 blocks a minute.
+const INDEXER_SUBREQUESTS = 40;
+const INDEXER_LOG_SPAN = 100;
+const INDEXER_LOG_REQUESTS = 22;
+const INDEXER_MAX_BLOCKS = INDEXER_LOG_SPAN * 3 * INDEXER_LOG_REQUESTS;
+const INDEXER_MAX_ROWS = 15;
+// Endpoints the Worker asks last (only when nothing else answered): the official node refuses Cloudflare.
+const AVOID = ['official'];
+const JOBS_MAX_AGE = 1800;     // leftover rows of the old report/link job queue are purged after this
 
 // ---- D1: the Worker's own two tables (created on first use; also in docs/API.md) ----------------------------
 const SQL_SCHEMA = [
@@ -80,10 +76,6 @@ const BEHIND_SECONDS = 600;
 const SQL_CACHE_GET = 'SELECT body FROM api_cache WHERE key = ?1 AND expires > ?2';
 const SQL_CACHE_PUT = 'INSERT INTO api_cache (key, body, expires) VALUES (?1, ?2, ?3) ON CONFLICT(key) DO UPDATE SET body = excluded.body, expires = excluded.expires';
 const SQL_CACHE_PURGE = 'DELETE FROM api_cache WHERE key IN (SELECT key FROM api_cache WHERE expires <= ?1 LIMIT 500)';
-const SQL_JOB_UPSERT = 'INSERT INTO api_jobs (key, kind, token, created, touched, attempts, progress) VALUES (?1, ?2, ?3, ?4, ?4, 0, ?5) ON CONFLICT(key) DO UPDATE SET progress = excluded.progress';
-const SQL_JOBS_NEXT = 'SELECT key, kind, token, created, attempts FROM api_jobs ORDER BY touched ASC LIMIT ?1';
-const SQL_JOB_TOUCH = 'UPDATE api_jobs SET touched = ?2, attempts = attempts + 1, progress = ?3 WHERE key = ?1';
-const SQL_JOB_DELETE = 'DELETE FROM api_jobs WHERE key = ?1';
 const SQL_JOBS_PURGE = 'DELETE FROM api_jobs WHERE key IN (SELECT key FROM api_jobs WHERE created <= ?1 LIMIT 500)';
 
 // =============================================================================================================
@@ -260,7 +252,7 @@ function requestLanes() {
 // Runs fn with `budget` as the active budget.
 async function withBudget(budget, fn) {
   const store = await getAls();
-  _setTransport({ fetch: routedFetch });
+  _setTransport({ fetch: routedFetch, avoid: AVOID });
   _setLaneScope(requestLanes);
   if (store) return store.run(budget, fn);
   const prev = current;
@@ -274,26 +266,6 @@ function moduleBudget(budget) {
   const view = Object.create(budget);
   view.fetch = (input, init) => (activeBudget() || budget).fetch(input, init);
   return view;
-}
-
-// The budget report.js / links.js get: a child of the request's budget (it spends from it, capped at `cap`),
-// marked as already scoped. report.js scopedBudget() then uses it as it is. Without the mark it would make its own
-// counter and point rpc.js's transport, which is shared by the whole isolate, at it: every other request running
-// in this isolate at that moment would then count its RPC calls on this request's counter and get this request's
-// refusals (half-read facts cached as complete, a report stopped early). The child is also the active budget while
-// the module runs (inScope), so its RPC calls, through routedFetch, count on it and on the request.
-function scopedChild(budget, cap = Infinity) {
-  const child = budget.child(Math.max(0, Math.min(cap, budget.remaining())));
-  child.__scoped = true;
-  child.__root = budget.__root || budget;
-  return child;
-}
-async function inScope(budget, fn) {
-  const store = await getAls();
-  if (store) return store.run(budget, fn);
-  const prev = current;
-  current = budget;
-  try { return await fn(); } finally { current = prev; }
 }
 
 function budgetHeader(budget) {
@@ -427,37 +399,10 @@ async function healthBody(deps) {
 }
 
 // =============================================================================================================
-// GET /v1/copies?q=   (staged: each request reads as many coins as its budget fits; facts are kept in D1)
+// GET /v1/copies?q=   (the launch index only; the browser reads the chain facts)
 // =============================================================================================================
-function stagedGather(deps, stage) {
-  const gather = deps.gather || gatherFacts;
-  return async (row, ctx) => {
-    stage.total++;
-    const token = String((row && row.token) || '').toLowerCase();
-    const key = 'facts:' + token;
-    const hit = await d1Get(deps, key);
-    if (hit) { stage.done++; return hit; }
-    const release = deps.budget.reserve(FACT_RESERVE);
-    if (!release) { stage.pending++; return null; }
-    stage.started++;
-    const before = deps.budget.refused;
-    let facts = null;
-    try { facts = await gather(row, ctx); } catch (e) { facts = null; } finally { release(); }
-    if (facts && deps.budget.refused === before) {
-      stage.done++;
-      stage.fresh++;
-      await d1Put(deps, key, facts, TTL.facts);
-      return facts;
-    }
-    stage.pending++;
-    if (facts) stage.partials.push({ key, facts });
-    return facts;
-  };
-}
-
-// The launch-index search of a copy check, kept in D1 for 5 minutes. A copy check being built is asked again every
-// few seconds, and a common name's search reads hundreds of launch rows each time (D1 bills rows read): the
-// polls after the first read one cached row instead.
+// The launch-index search of a copy check, kept in D1 for a minute: a common name's search reads hundreds of
+// launch rows (D1 bills rows read), and the same ticker is often asked many times in a row.
 function rowCachedIndex(index, deps) {
   if (!index || typeof index.findBySkeletons !== 'function' || !deps.db) return index;
   return {
@@ -475,125 +420,76 @@ function rowCachedIndex(index, deps) {
   };
 }
 
-async function copiesBody(rawQuery, deps) {
+// hint: { name, symbol } the browser read from the chain for an address the index doesn't have (search words only).
+async function copiesBody(rawQuery, deps, hint = null) {
   const query = String(rawQuery == null ? '' : rawQuery).trim();
   if (!query) return fail('bad-input', 'Paste a ticker or a coin address.');
   if (query.length > 100) return fail('bad-input', 'That\'s too long for a ticker or an address.');
-  const key = 'copies:' + (isAddr(query) ? query.toLowerCase() : query);
+  const h = hint && isAddr(query) && (hint.name != null || hint.symbol != null)
+    ? { name: String(hint.name || '').slice(0, 200), symbol: String(hint.symbol || '').slice(0, 200) } : null;
+  const key = 'copies:' + (isAddr(query) ? query.toLowerCase() : query) + (h ? '|' + hashKey(h.name + '\u0000' + h.symbol) : '');
   const hit = await cacheGet(deps, key);
   if (hit) return { status: 200, body: hit, cacheSeconds: BROWSER_SECONDS };
-
-  const stage = { total: 0, done: 0, fresh: 0, started: 0, pending: 0, partials: [] };
   let r;
   try {
-    r = await (deps.copyCheck || copyCheck)({
-      query, db: rowCachedIndex(deps.index || (deps.db ? d1Index(deps.db) : null), deps), fetch: routedFetch, settings: deps.settings, now: deps.now, gather: stagedGather(deps, stage),
+    r = await (deps.copyMatches || copyMatches)({
+      query, db: rowCachedIndex(deps.index || (deps.db ? d1Index(deps.db) : null), deps), settings: deps.settings, now: deps.now, hint: h,
     });
   } catch (e) { r = null; }
   if (!r) return fail('unavailable', 'The copy check is unavailable right now. Try again in a minute.');
   if (r.ok !== true) return { status: statusFor(r.code), body: { ok: false, code: r.code || 'unavailable', message: r.message || 'The copy check is unavailable right now.' } };
-
-  if (stage.pending > 0) {
-    // Nothing new finished in this request: keep what the cut-off reads got, so every request moves forward.
-    if (stage.fresh === 0 && stage.partials.length) {
-      for (const p of stage.partials) await d1Put(deps, p.key, p.facts, TTL.partialFacts);
-      stage.done += stage.partials.length;
-    }
-    if (stage.fresh > 0 || stage.partials.length) {
-      return { status: 202, body: { ok: true, status: 'building', step: 'copies', progress: progressOf(stage), retryAfterSeconds: 2 } };
-    }
-    // Not even one coin fitted. If earlier polls got some, the search was just costly this time: try again a few times.
-    if (stage.done > 0 && deps.db) {
-      const stallKey = 'stall:' + key;
-      const seen = await d1Get(deps, stallKey);
-      const n = (seen && Number(seen.n)) || 0;
-      if (n < COPIES_STALLS) {
-        await d1Put(deps, stallKey, { n: n + 1 }, STALL_SECONDS);
-        return { status: 202, body: { ok: true, status: 'building', step: 'copies', progress: progressOf(stage), retryAfterSeconds: 3 } };
-      }
-    }
-    // The budget went on the search itself: answer what there is, briefly cached.
-    const body = { ...r, status: 'done', notes: (r.notes || []).concat('Some facts couldn\'t be read in time; ask again in a minute for the rest.') };
-    if (deps.cache) await deps.cache.put(key, body, TTL.partialFacts);
-    return { status: 200, body, cacheSeconds: 0 };
-  }
   const body = { ...r, status: 'done' };
   await cachePut(deps, key, body, TTL.copies);
   return { status: 200, body, cacheSeconds: BROWSER_SECONDS };
 }
-const progressOf = (st) => (st.total ? Math.round(Math.min(0.99, st.done / st.total) * 100) / 100 : 0);
 
 // =============================================================================================================
 // GET /v1/report/{token} and /v1/report/{token}/links
 // =============================================================================================================
-// cap: subrequests one call may use (report.js REPORT_SUBREQUESTS, links.js LINK_SUBREQUESTS).
-const KINDS = {
-  report: { fn: 'launchReport', advance: 'advanceReportJobs', ttl: TTL.report, what: 'The launch report', cap: 40 },
-  links: { fn: 'walletLinks', advance: 'advanceLinkJobs', ttl: TTL.links, what: 'Wallet links', cap: 30 },
-};
+const REPORT_NOTE = 'The launch report (dev moves, first buyers, fees, bridges, activity) is read from Robinhood Chain '
+  + 'by the website in your browser, or by the local MCP package (npx blamethestock-mcp). This answer holds the coin\'s '
+  + 'launch from our index.';
+const LINKS_NOTE = 'Wallet links are checked by the website in your browser, or by the local MCP package '
+  + '(npx blamethestock-mcp), after the launch report.';
 
-// Loads report.js / links.js on first use -> { run, advance } (either may be null). A missing or broken module
-// answers 'unavailable' instead of taking the whole API down.
-const loaded = {};
-async function loadKind(kind) {
-  if (!(kind in loaded)) {
-    loaded[kind] = (async () => {
-      try { return kind === 'report' ? await import('./report.js') : await import('./links.js'); } catch (e) { return null; }
-    })();
+// The coin's launch row from the index -> the report's basics (status 'basics'; nothing read from the chain).
+function reportBasicsOf(row, addr, deps) {
+  const official = ((deps.settings && deps.settings.trust && deps.settings.trust.official) || []).some((o) => String(o.address).toLowerCase() === addr);
+  if (!row) {
+    return { ok: true, status: 'basics', clientSide: true, inIndex: false, token: { address: addr, isOfficial: official }, launch: null,
+      note: 'This coin isn\'t in our launch index (yet, or it wasn\'t launched on Pons). ' + REPORT_NOTE };
   }
-  return pick(kind, await loaded[kind]);
-}
-function pick(kind, mod) {
-  if (typeof mod === 'function') return { run: mod, advance: null };            // tests: just the function
-  const fn = (name) => (mod && typeof mod[name] === 'function' ? mod[name] : null);
-  return { run: fn(KINDS[kind].fn), advance: fn(KINDS[kind].advance) };
-}
-async function kindModule(kind, deps) {
-  if (deps.modules && deps.modules[kind] !== undefined) return pick(kind, deps.modules[kind]);
-  return loadKind(kind);
-}
-
-// null = the module isn't there.
-async function runKind(kind, token, deps, mod = null) {
-  const m = mod || await kindModule(kind, deps);
-  if (!m.run) return null;
-  const b = scopedChild(deps.budget, deps.moduleCap != null ? deps.moduleCap : KINDS[kind].cap);
-  return inScope(b, () => m.run({ token, env: deps.moduleEnv, settings: deps.settings, now: deps.now, budget: b }));
+  const time = row.time == null ? null : Number(row.time);
+  const launch = {};
+  for (const k of ['token', 'factory', 'curve', 'creator', 'tx_from', 'pair_token', 'block', 'log_index', 'time', 'tx', 'name', 'symbol']) launch[k] = row[k] === undefined ? null : row[k];
+  return {
+    ok: true, status: 'basics', clientSide: true, inIndex: true,
+    token: {
+      address: addr, name: row.name, symbol: row.symbol, isOfficial: official,
+      pons: { factory: row.factory, curve: row.curve, launchTx: row.tx, launchBlock: Number(row.block), launchTime: isoOf(time), pairToken: row.pair_token },
+    },
+    launch,
+    proof: { token: tokenUrl(addr), launchTx: txUrl(row.tx), curve: addressUrl(row.curve) },
+    note: REPORT_NOTE,
+  };
 }
 
-async function kindBody(kind, rawToken, deps) {
-  const K = KINDS[kind];
+async function reportBody(rawToken, deps) {
   const token = String(rawToken || '').trim();
   if (!isAddr(token)) return fail('bad-address', 'That isn\'t a coin address: it should be 0x and 40 letters or numbers.');
   const addr = token.toLowerCase();
-  const key = kind + ':' + addr;
-  const hit = await cacheGet(deps, key);
-  if (hit) return { status: 200, body: hit, cacheSeconds: BROWSER_SECONDS };
-
-  const mod = await kindModule(kind, deps);
-  let r;
-  try { r = await runKind(kind, addr, deps, mod); } catch (e) { r = undefined; }
-  if (r === null) return fail('unavailable', K.what + ' isn\'t available yet.');
-  if (!r || typeof r !== 'object') return fail('unavailable', K.what + ' is unavailable right now. Try again in a minute.');
-  if (r.ok !== true) return { status: statusFor(r.code), body: { ok: false, code: r.code || 'unavailable', message: r.message || (K.what + ' is unavailable right now.') } };
-  if (r.status === 'building') {
-    if (!mod.advance) await enqueue(deps, kind, addr, r.progress);   // a module with its own job table queues itself
-    return { status: 202, body: { ...r, retryAfterSeconds: r.retryAfterSeconds || 3 } };
-  }
-  if (r.status === 'done') {
-    await cachePut(deps, key, r, K.ttl);
-    return { status: 200, body: r, cacheSeconds: BROWSER_SECONDS };
-  }
-  return { status: 200, body: r };   // e.g. links 'unavailable' (explorer busy): not cached, the card offers a retry
+  const index = deps.index || (deps.db ? d1Index(deps.db) : null);
+  if (!index) return fail('unavailable', 'The launch index isn\'t connected.');
+  let row;
+  try { row = await index.findByToken(addr); } catch (e) { return fail('unavailable', 'The launch index is unavailable right now. Try again in a minute.'); }
+  return { status: 200, body: reportBasicsOf(row, addr, deps), cacheSeconds: BROWSER_SECONDS };
 }
 
-async function enqueue(deps, kind, token, progress) {
-  if (!deps.db) return;
-  try {
-    await ensureTables(deps.db);
-    const p = Number.isFinite(progress) ? progress : null;
-    await deps.db.prepare(SQL_JOB_UPSERT).bind(kind + ':' + token, kind, token, nowSeconds(deps.now), p).run();
-  } catch (e) { /* the client's own polling still moves it on */ }
+function linksBody(rawToken) {
+  const token = String(rawToken || '').trim();
+  if (!isAddr(token)) return fail('bad-address', 'That isn\'t a coin address: it should be 0x and 40 letters or numbers.');
+  return { status: 200, body: { ok: true, status: 'client', clientSide: true, token: token.toLowerCase(), funders: [], links: [], ignored: [],
+    caveat: 'Wallets funded through exchanges, bridges or privacy tools can\'t be linked.', note: LINKS_NOTE }, cacheSeconds: 300 };
 }
 
 // =============================================================================================================
@@ -631,7 +527,7 @@ async function handle(request, env, ctx, deps) {
   if (path === '/' || path === '/v1') {
     return jsonAnswer(200, {
       ok: true, service: 'bts-api', version: VERSION,
-      about: 'Read-only facts about Robinhood Chain coins. Not financial advice.',
+      about: 'Read-only facts about Robinhood Chain coins. Not financial advice. The launch index is served here; chain facts are read by the website in your browser.',
       endpoints: ['/v1/health', '/v1/copies?q=TICKER|0xADDRESS', '/v1/report/0xTOKEN', '/v1/report/0xTOKEN/links', '/mcp'],
       site: 'https://blamethestock.com',
     }, { cacheSeconds: 300, headers: cors });
@@ -640,12 +536,16 @@ async function handle(request, env, ctx, deps) {
     const r = await healthBody(deps);
     return jsonAnswer(r.status, r.body, { cacheSeconds: r.status === 200 ? HEALTH_SECONDS : 0, headers: cors });
   }
-  if (path === '/v1/copies') return out(await copiesBody(url.params.get('q'), deps));
+  if (path === '/v1/copies') {
+    const p = url.params;
+    const hint = p.has('name') || p.has('symbol') ? { name: p.get('name'), symbol: p.get('symbol') } : null;
+    return out(await copiesBody(p.get('q'), deps, hint));
+  }
 
   const m = /^\/v1\/report\/([^/]+)(\/links)?$/.exec(path);
   if (m) {
     const token = dec(m[1]);
-    return out(await kindBody(m[2] ? 'links' : 'report', token, deps));
+    return out(m[2] ? linksBody(token) : await reportBody(token, deps));
   }
   return jsonAnswer(404, { ok: false, code: 'not-found', message: 'Nothing here. See /v1/health.' }, { headers: cors });
 }
@@ -673,8 +573,8 @@ async function mcpAnswer(request, env, ctx, deps) {
   }
   const api = {
     copies: async (q) => (await copiesBody(q, deps)).body,
-    report: async (t) => (await kindBody('report', t, deps)).body,
-    links: async (t) => (await kindBody('links', t, deps)).body,
+    report: async (t) => (await reportBody(t, deps)).body,
+    links: async (t) => linksBody(t).body,
   };
   try {
     const res = await handler(request, env, ctx, { settings: deps.settings, budget: moduleBudget(deps.budget), now: deps.now, api, fetch: routedFetch });
@@ -685,7 +585,7 @@ async function mcpAnswer(request, env, ctx, deps) {
 }
 
 // =============================================================================================================
-// The cron: indexer first, then queued report/link jobs, then old cache rows out.
+// The cron: the indexer, then old cache rows out.
 // =============================================================================================================
 async function runScheduled(env, deps = {}) {
   const now = deps.now != null ? deps.now : Date.now();
@@ -693,80 +593,30 @@ async function runScheduled(env, deps = {}) {
   const rawDb = env && env.DB;
   const db = budget.wrapDb(rawDb);
   const log = deps.log || ((t) => console.log(t));
-  const out = { indexer: null, jobs: [], purged: false, budget: null };
+  const out = { indexer: null, purged: false, budget: null };
   if (!rawDb) { out.indexer = { ok: false, error: 'DB binding missing' }; return out; }
 
-  // 1. the launch index
+  // 1. the launch index (dRPC in 100-block pieces; the official node only as a last resort)
   const ib = budget.child(INDEXER_SUBREQUESTS);
   try {
-    out.indexer = await withBudget(ib, () => (deps.runIndexer || runIndexer)({ ...env, DB: ib.wrapDb(rawDb) }, { maxBlocks: INDEXER_MAX_BLOCKS, maxRows: INDEXER_MAX_ROWS, log, now: () => now }));
+    out.indexer = await withBudget(ib, () => (deps.runIndexer || runIndexer)({ ...env, DB: ib.wrapDb(rawDb) }, {
+      maxBlocks: INDEXER_MAX_BLOCKS, maxRows: INDEXER_MAX_ROWS, logSpan: INDEXER_LOG_SPAN, maxLogRequests: INDEXER_LOG_REQUESTS, log, now: () => now,
+    }));
   } catch (e) {
     out.indexer = { ok: false, error: errText(e) };
     log('indexer: stopped: ' + errText(e));
   }
+  out.indexerBudget = ib.snapshot();
 
-  // 2. report/link jobs. A module with its own job table (report.js advanceReportJobs, links.js advanceLinkJobs)
-  //    moves its own queue on; otherwise the Worker's api_jobs queue is used. The report gets ~60% of what is left.
-  const jd = { db, now, settings: deps.settings || settingsFor(env), modules: deps.modules, budget };
-  const mods = { report: await kindModule('report', jd), links: await kindModule('links', jd) };
-  for (const kind of ['report', 'links']) {
-    const adv = mods[kind].advance;
-    if (!adv) continue;
-    const room = budget.remaining();
-    if (room < JOBS.minRoom) break;
-    const jb = scopedChild(budget, kind === 'report' ? Math.max(JOBS.minRoom, Math.floor(room * 0.6)) : room);
-    try {
-      const r = await withBudget(jb, () => adv({ env: { ...env, DB: jb.wrapDb(rawDb) }, settings: jd.settings, now, budget: jb }));
-      out.jobs.push({ key: kind + ':*', result: 'advanced ' + ((r && r.advanced && r.advanced.length) || 0) + ', done ' + ((r && r.done && r.done.length) || 0) });
-    } catch (e) {
-      log(kind + ' jobs: stopped: ' + errText(e));
-    }
-  }
+  // 2. expired cache rows (and rows left by the old report/link job queue)
   try {
     await ensureTables(db);
-    const res = await db.prepare(SQL_JOBS_NEXT).bind(JOBS.perRun).all();
-    for (const j of (res && res.results) || []) {
-      const nowS = nowSeconds(now);
-      const mod = KINDS[j.kind] ? mods[j.kind] : null;
-      if (!mod || mod.advance || j.attempts >= JOBS.maxAttempts || nowS - j.created > JOBS.maxAgeSeconds) {
-        await db.prepare(SQL_JOB_DELETE).bind(j.key).run();
-        out.jobs.push({ key: j.key, result: 'dropped' });
-        continue;
-      }
-      if (budget.remaining() < JOBS.minRoom) break;
-      const jb = budget.child(budget.remaining());
-      const d = { ...jd, budget: jb, db: jb.wrapDb(rawDb), moduleEnv: { ...env, DB: jb.wrapDb(rawDb) }, moduleCap: Infinity };
-      let r;
-      try { r = await withBudget(jb, () => runKind(j.kind, j.token, d, mod)); } catch (e) { r = undefined; }
-      if (r && r.ok === true && r.status === 'building') {
-        await db.prepare(SQL_JOB_TOUCH).bind(j.key, nowS, Number.isFinite(r.progress) ? r.progress : null).run();
-        out.jobs.push({ key: j.key, result: 'building', progress: r.progress });
-      } else if (r && r.ok === true && r.status === 'done') {
-        await d1Put({ db, now }, j.kind + ':' + j.token, r, KINDS[j.kind].ttl);
-        await db.prepare(SQL_JOB_DELETE).bind(j.key).run();
-        out.jobs.push({ key: j.key, result: 'done' });
-      } else if (r === null) {
-        out.jobs.push({ key: j.key, result: 'module-missing' });
-        break;
-      } else {
-        // an error or 'unavailable': the job ends; the next visitor's request starts it again if needed
-        await db.prepare(SQL_JOB_DELETE).bind(j.key).run();
-        out.jobs.push({ key: j.key, result: (r && (r.code || r.status)) || 'error' });
-      }
-    }
-  } catch (e) {
-    log('jobs: stopped: ' + errText(e));
-  }
-
-  // 3. expired cache rows and abandoned jobs
-  try {
     const nowS = nowSeconds(now);
-    await db.batch([db.prepare(SQL_CACHE_PURGE).bind(nowS), db.prepare(SQL_JOBS_PURGE).bind(nowS - JOBS.maxAgeSeconds)]);
+    await db.batch([db.prepare(SQL_CACHE_PURGE).bind(nowS), db.prepare(SQL_JOBS_PURGE).bind(nowS - JOBS_MAX_AGE)]);
     out.purged = true;
   } catch (e) { /* next minute */ }
 
   out.budget = budget.snapshot();
-  if (out.jobs.length) log('jobs: ' + out.jobs.map((j) => j.key.slice(0, 18) + '… ' + j.result).join(', '));
   return out;
 }
 
@@ -784,7 +634,6 @@ function requestDeps(request, env, ctx, extra = {}) {
     now: Date.now(),
     budget,
     db,
-    moduleEnv: { ...(env || {}), DB: db },
     settings: settingsFor(env),
     cache: cfCache(budget, url.origin, ctx),
     limiter,
@@ -795,13 +644,12 @@ function requestDeps(request, env, ctx, extra = {}) {
 // The entry module may export only the handler (workerd treats every named export as an entrypoint), so the
 // testable parts ride along as `internals` (workerd ignores keys it doesn't know). dev/tests/worker.test.js uses them.
 const internals = {
-  VERSION, DEFAULT_ORIGINS, RATE, TTL, BROWSER_SECONDS, HEALTH_SECONDS, FACT_RESERVE, JOBS, INDEXER_SUBREQUESTS,
-  INDEXER_MAX_BLOCKS, INDEXER_MAX_ROWS, KINDS,
-  SQL_SCHEMA, SQL_META, SQL_OLDEST_TIME, SQL_NEWEST_AT, SQL_CACHE_GET, SQL_CACHE_PUT, SQL_CACHE_PURGE, SQL_JOB_UPSERT, SQL_JOBS_NEXT, SQL_JOB_TOUCH,
-  SQL_JOB_DELETE, SQL_JOBS_PURGE,
-  COPIES_STALLS, rowCachedIndex, scopedChild, inScope, parseUrl, allowedOrigins, corsHeaders, preflightHeaders, hashKey, createRateLimiter, settingsFor, statusFor,
+  VERSION, DEFAULT_ORIGINS, RATE, TTL, BROWSER_SECONDS, HEALTH_SECONDS, INDEXER_SUBREQUESTS, INDEXER_LOG_SPAN, INDEXER_LOG_REQUESTS,
+  INDEXER_MAX_BLOCKS, INDEXER_MAX_ROWS, AVOID, REPORT_NOTE, LINKS_NOTE,
+  SQL_SCHEMA, SQL_META, SQL_OLDEST_TIME, SQL_NEWEST_AT, SQL_CACHE_GET, SQL_CACHE_PUT, SQL_CACHE_PURGE, SQL_JOBS_PURGE,
+  rowCachedIndex, parseUrl, allowedOrigins, corsHeaders, preflightHeaders, hashKey, createRateLimiter, settingsFor, statusFor,
   jsonAnswer, toResponse, routedFetch, withBudget, useAsyncLocalStorage, requestLanes, _resetForTests, ensureTables, cfCache, d1Get, d1Put, cacheGet,
-  cachePut, healthBody, stagedGather, copiesBody, loadKind, kindModule, kindBody, enqueue, handle, runScheduled, requestDeps,
+  cachePut, healthBody, copiesBody, reportBody, linksBody, reportBasicsOf, handle, runScheduled, requestDeps,
 };
 
 export default {
@@ -825,6 +673,6 @@ export default {
     const now = controller && Number.isFinite(controller.scheduledTime) ? controller.scheduledTime : Date.now();
     const budget = createBudget({ limit: DEFAULT_LIMIT, d1Limit: DEFAULT_D1_LIMIT });
     const out = await withBudget(budget, () => runScheduled(env, { now, budget }));
-    console.log('cron: ' + JSON.stringify({ indexer: out.indexer && { from: out.indexer.from, to: out.indexer.to, written: out.indexer.written, error: out.indexer.error }, jobs: out.jobs.length, budget: out.budget }));
+    console.log('cron: ' + JSON.stringify({ indexer: out.indexer && { from: out.indexer.from, to: out.indexer.to, head: out.indexer.head, written: out.indexer.written, logRequests: out.indexer.logRequests, error: out.indexer.error }, budget: out.budget }));
   },
 };

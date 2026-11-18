@@ -150,6 +150,10 @@ a.cc-symbol:hover { text-decoration: underline; text-underline-offset: 4px; }
   font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
 }
 .cc-unknown { color: var(--bts-grey); font-weight: 500; }
+/* A coin whose facts are still being read in the browser: its fact values pulse softly until they arrive. */
+.cc-row.is-pending .cc-facts .cc-unknown { animation: bts-pulse .9s ease-in-out infinite alternate; }
+.cc-reading { margin-top: 12px; }
+@media (prefers-reduced-motion: reduce) { .cc-row.is-pending .cc-facts .cc-unknown { animation: none; } }
 
 .cc-flags { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
 .cc-flag { display: flex; align-items: baseline; gap: 10px; font-size: 14px; line-height: 1.45; }

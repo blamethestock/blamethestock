@@ -18,8 +18,11 @@ The same facts as [blamethestock.com](https://blamethestock.com), with a proof l
 Every answer is a short plain-text summary, then the same facts as JSON (also in `structuredContent`), with
 Blockscout proof links (`https://robinhoodchain.blockscout.com/tx/…`, `/address/…`, `/token/…`).
 
-A big launch report is built in small steps. If an answer says `"status": "building"`, call the same tool again
-in about 20 seconds.
+**Hosted vs local.** The hosted server can't read Robinhood Chain at the moment (the chain's public RPC refuses
+Cloudflare's network): there, `check_copycats` lists the same-name launches from our launch index and
+`launch_report` gives the coin's launch basics, each with a note, and `blame_split` points to the website card.
+The local package below reads the chain from your own machine and gives the full facts, flags, launch report
+and wallet links.
 
 Wallets funded through exchanges, bridges or privacy tools can't be linked, so "no link found" is not proof that
 there is none.
@@ -41,7 +44,9 @@ claude mcp add --transport http blamethestock https://api.blamethestock.com/mcp
 
 ### Local (stdio, via npx)
 
-This package runs a small local server that forwards each tool call to the hosted API. It needs Node.js 20 or newer.
+This package runs a small local server that reads Robinhood Chain from your machine (its public RPC and explorer)
+and asks the hosted API only for its launch index. A launch report can take up to a minute. It needs Node.js 20 or
+newer. (`--remote` forwards every call to the hosted server instead.)
 
 **Claude Desktop** (`claude_desktop_config.json`):
 
@@ -68,7 +73,7 @@ claude mcp add blamethestock -- npx -y blamethestock-mcp
 
 | Variable | Default | What it does |
 |---|---|---|
-| `BTS_API_BASE` | `https://api.blamethestock.com` | Where the tools send their calls (`<base>/mcp`). Only change it to test a local copy of the API, e.g. `http://localhost:8787`. |
+| `BTS_API_BASE` | `https://api.blamethestock.com` | Where the launch index is read (`<base>/v1/...`; with `--remote`, `<base>/mcp`). Only change it to test a local copy of the API, e.g. `http://localhost:8787`. |
 
 ### Docker
 
@@ -79,7 +84,8 @@ docker run -i --rm blamethestock-mcp
 
 ## Privacy
 
-Nothing about you is stored. The local server sends only the tool name and its input to the API. The API keeps no
+Nothing about you is stored. The local server sends only the tool's input (a ticker or a coin address) to the API,
+and reads public chain data from Robinhood Chain's RPC nodes and explorer. The API keeps no
 IP addresses or user agents; results are cached by coin or query only.
 
 ## License

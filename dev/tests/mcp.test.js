@@ -8,7 +8,10 @@ import { createBudget } from '../../api/src/budget.js';
 import { WINDOW_SECONDS } from '../../site/src/core/math.js';
 import * as P from '../../mcp/src/tools.js';
 import { callRemoteTool, parseRpcBody, apiBase, PROTOCOL_VERSION } from '../../mcp/src/remote.js';
-import { loadFixture, runScenario, OBSYN } from './fixtures/obsyn/replay.js';
+import { loadFixture, runScenario, replayFetch, fixtureIndex, OBSYN } from './fixtures/obsyn/replay.js';
+import { loadReportFixture } from './fixtures/obsyn/report-replay.js';
+import { copyMatches } from '../../api/src/copies.js';
+import { localTools, _resetShared } from '../../mcp/src/local.js';
 
 const PROOF_RE = /https:\/\/robinhoodchain\.blockscout\.com\/(tx|address|token|block)\/[0-9a-fx]+/g;
 const PROOF_ONE = /^https:\/\/robinhoodchain\.blockscout\.com\/(tx\/0x[0-9a-f]{64}|address\/0x[0-9a-f]{40}|token\/0x[0-9a-f]{40}|block\/\d+)$/;
@@ -541,3 +544,147 @@ test('README: install snippets, read-only and not-advice note, no machine paths'
     ok(!/\/Users\/|\/home\/|C:\\\\/.test(readPkgFile(f)), f + ' has no machine paths');
   }
 });
+
+// A project file (jsc only; null in a browser).
+function readText(rel) {
+  const url = import.meta.url;
+  if (typeof read === 'function' && /^file:/.test(url)) {
+    const dir = decodeURIComponent(url.replace(/^file:\/\//, '')).replace(/[^/]*$/, '');
+    try { return read(dir + '../../' + rel); } catch (e) { return null; }
+  }
+  return null;
+}
+
+// =========================================================================================================
+suite('mcp › hosted (no chain reads on Cloudflare)');
+
+async function obsynListing() {
+  const fx = await loadFixture();
+  const head = fx.index.head;
+  const index = fixtureIndex(fx.index.rows, { lastBlock: head.number, lastRun: head.time });
+  return { fx, index, head, listing: { ...(await copyMatches({ query: 'OBSYN', db: index, now: head.time * 1000 })), status: 'done' } };
+}
+
+test('check_copycats hosted: the index list with launch info and a clear note where the full facts are read', async () => {
+  const { listing } = await obsynListing();
+  const r = await M.runCheckCopycats({ query: 'OBSYN' }, { api: { copies: async () => listing }, hosted: true });
+  const s = text(r);
+  ok(!r.isError);
+  ok(s.includes(M.HOSTED_NOTE), s.slice(0, 400));
+  ok(/website|blamethestock\.com/.test(M.HOSTED_NOTE) && M.HOSTED_NOTE.includes('npx -y blamethestock-mcp'));
+  ok(/launch index as of/.test(s));
+  ok(/launched 2026-11-17 14:02:15 UTC; launch block \d+; chain facts not read here/.test(s), s);
+  eq(r.structuredContent.facts, 'client');
+  eq(r.structuredContent.matches.length, 4);
+  eq(r.structuredContent.localPackage, 'npx -y blamethestock-mcp');
+  proofsOk(s, 'copycats hosted');
+  wordsOk(s, 'copycats hosted');
+});
+
+test('launch_report hosted: the launch basics plus the note; links_status "client"; not in the index said plainly', async () => {
+  const basics = { ok: true, status: 'basics', clientSide: true, inIndex: true,
+    token: { address: REAL, name: 'obsyn', symbol: 'OBSYN', isOfficial: false, pons: { launchTx: '0xec919f76f60857d7e76be568966af6e3e1f8b3b0e590d77276c5bbb37419df0c', launchBlock: 116638986, launchTime: '2026-11-17T14:14:00Z' } },
+    launch: { token: REAL, creator: DEV, tx_from: null }, note: 'n' };
+  let linksAsked = 0;
+  const r = await M.runLaunchReport({ token: REAL }, { api: { report: async () => basics, links: async () => { linksAsked++; return noLinks(); } }, hosted: true });
+  const s = text(r);
+  ok(s.startsWith('Launch basics for OBSYN (obsyn) ' + REAL), s);
+  ok(s.includes('Launch: 2026-11-17 14:14:00 UTC, block 116638986'));
+  ok(s.includes('Launched by ' + DEV));
+  ok(s.includes(M.HOSTED_NOTE));
+  eq([r.structuredContent.status, r.structuredContent.links_status, r.structuredContent.links], ['basics', 'client', null]);
+  eq(linksAsked, 0, 'no wallet links asked for hosted');
+  proofsOk(s, 'report hosted');
+  wordsOk(s, 'report hosted');
+  const none = await M.runLaunchReport({ token: REAL }, { api: { report: async () => ({ ok: true, status: 'basics', inIndex: false, token: { address: REAL }, launch: null }) }, hosted: true });
+  ok(/isn't in our launch index/.test(text(none)));
+  wordsOk(text(none), 'report hosted, not indexed');
+});
+
+test('blame_split hosted: a clear note with the card link and the local package, without trying the chain', async () => {
+  let called = 0;
+  const r = await M.runBlameSplit({ token: REAL, window: '6h' }, { hosted: true, fetchPriceInput: async () => { called++; return priceInput(); }, cache: null });
+  eq(called, 0);
+  ok(!r.isError);
+  eq(r.structuredContent.status, 'unavailable-hosted');
+  eq(r.structuredContent.link, 'https://blamethestock.com/?ca=' + REAL + '&w=6h');
+  ok(text(r).includes('npx -y blamethestock-mcp') && text(r).includes(r.structuredContent.link));
+  wordsOk(text(r), 'split hosted');
+  const local = await M.runBlameSplit({ token: REAL }, { fetchPriceInput: async () => priceInput(), cache: null });
+  ok(local.structuredContent.ok === true, 'outside the Worker it still computes the split');
+});
+
+// =========================================================================================================
+suite('mcp › local package (reads the chain on the user\'s machine)');
+
+test('check_copycats locally: the hosted list, then full facts and flags read here (same as the website)', async () => {
+  const { fx, listing } = await obsynListing();
+  const direct = JSON.parse(JSON.stringify(await runScenario({ query: 'OBSYN' }, fx)));
+  const chain = replayFetch(fx);
+  const urls = [];
+  const fetchFn = async (url, init) => {
+    if (String(url).startsWith('http://api.test')) { urls.push(url); return { status: 200, json: async () => JSON.parse(JSON.stringify(listing)) }; }
+    return chain(url, init);
+  };
+  _resetShared();
+  const tools = localTools({ base: 'http://api.test', fetch: fetchFn, sleep: async () => {}, settings: { trust: {} }, transport: { sleep: async () => {}, backoff: [0], timeouts: false } });
+  const r = await tools.run('check_copycats', { query: 'OBSYN' });
+  eq(urls, ['http://api.test/v1/copies?q=OBSYN']);
+  ok(!r.isError, text(r));
+  const { disclaimer, ...rest } = r.structuredContent;
+  eq(JSON.stringify(rest.matches), JSON.stringify(direct.matches), 'the same facts as reading everything in one place');
+  ok(!text(r).includes(M.HOSTED_NOTE), 'no "facts not read" note: they were read');
+  const copy = rest.matches.find((m) => m.address === OBSYN.copy);
+  eq(copy.flags.filter((f) => f.severity === 'warn').map((f) => f.code).sort(), ['dev-dumped-fast', 'fees-and-left', 'launched-just-before']);
+  wordsOk(text(r), 'copycats local');
+});
+
+test('launch_report locally: built here from the hosted launch row, then wallet links (recorded OBSYN)', async () => {
+  const fx = await loadReportFixture();
+  const row = fx.index.rows.find((x) => x.token === REAL);
+  const basics = { ok: true, status: 'basics', inIndex: true, token: { address: REAL }, launch: row };
+  const chain = replayFetch(fx);
+  const asked = [];
+  const fetchFn = async (url, init) => {
+    if (String(url).startsWith('http://api.test')) { asked.push(url); return { status: 200, json: async () => basics }; }
+    return chain(url, init);
+  };
+  _resetShared();
+  const now = (fx.index.head.time + 60) * 1000;
+  const realNow = Date.now;
+  Date.now = () => now;
+  let r;
+  try {
+    const tools = localTools({ base: 'http://api.test', fetch: fetchFn, sleep: async () => {}, settings: { trust: {} }, transport: { sleep: async () => {}, backoff: [0], timeouts: false } });
+    r = await tools.run('launch_report', { token: REAL });
+  } finally { Date.now = realNow; }
+  eq(asked, ['http://api.test/v1/report/' + REAL]);
+  ok(!r.isError, text(r).slice(0, 300));
+  const j = r.structuredContent;
+  eq(j.status, 'done');
+  eq(j.dev.address, DEV);
+  eq(Math.round(j.dev.buy.pct * 1000) / 1000, 1.142);
+  eq(j.snipers.wallets.length, 9);
+  eq(Math.round(j.snipers.totalPct * 10) / 10, 20.5);
+  eq(j.graduation.time, '2026-11-17T19:31:25Z');
+  ok(j.dev.fees.claims.length >= 1);
+  eq(j.links_status, 'ok');
+  ok(!j.notes.some((n) => /isn't in our launch index yet/.test(n)), 'the hosted row was used, not a chain lookup');
+  ok(/Heavily sniped by bots \(20\.5% in 3 s/.test(text(r)));
+  wordsOk(text(r), 'report local');
+});
+
+test('the package\'s shared code is an exact copy of the project\'s (run dev/tools/sync_mcp.sh after a change)', () => {
+  const list = readText('mcp/src/shared-files.txt');
+  if (list == null) return;                       // browser runner: no file access
+  const files = list.split('\n').filter(Boolean);
+  ok(files.length >= 25 && files.includes('api/src/mcp.js') && files.includes('site/src/trust/copycheck.js') && files.includes('site/src/trust/local.js'), files.join(' '));
+  for (const f of files) {
+    const a = readText(f), b = readText('mcp/src/shared/' + f);
+    ok(a != null && a === b, f + ' differs from mcp/src/shared/' + f);
+  }
+  const pkg = JSON.parse(readText('mcp/package.json'));
+  ok(pkg.files.includes('src'), 'the copies ship inside src/');
+  ok(!/\/Users\//.test(readText('mcp/src/local.js')), 'no machine paths');
+});
+

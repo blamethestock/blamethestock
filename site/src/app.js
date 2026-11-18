@@ -181,7 +181,8 @@ async function showOffHours(out, priceInput, result, my) {
 }
 
 // ---- Copy check, "Is this the real one?" (settings.trust) ---------------------------------------
-// Its own card in #copies, under the blame card, from our API. It loads on its own and never holds up or breaks
+// Its own card in #copies, under the blame card: the same-name launches from our API, each coin's facts read from
+// the chain in this browser. It loads on its own and never holds up or breaks
 // the blame card: if the API can't be reached it says so in one grey line.
 let copySeq = 0;
 let copyFor = null;                             // the query on screen (or on its way), so tab switches don't re-ask
@@ -207,7 +208,11 @@ function copies(query, { reveal: show = null } = {}) {
     if (!live()) return;
     card.renderCopiesLoading(out, SETTINGS);
     if (show) show(out);
-    const res = await card.loadCopies(query, SETTINGS, { live, onProgress: (p) => { if (live()) card.renderCopiesLoading(out, SETTINGS, p); } });
+    // the list from our API, then each coin's chain facts read here: the rows fill in as they arrive
+    const res = await card.loadCopies(query, SETTINGS, { live, onProgress: (p) => {
+      if (!live()) return;
+      if (typeof p === 'number') card.renderCopiesLoading(out, SETTINGS, p); else card.renderCopies(out, p, SETTINGS);
+    } });
     if (res === undefined || !live()) return;
     if (!res || res.ok !== true) copyFor = null;   // the next lookup of the same coin asks again
     card.renderCopies(out, res, SETTINGS);
@@ -224,8 +229,8 @@ function copies(query, { reveal: show = null } = {}) {
 }
 
 // ---- Launch report (settings.trust.report) -------------------------------------------------------
-// Its own card in #report, under the copy check, from our API: polls while the API is still building it (with
-// progress), then loads the wallet links separately, after the report is on screen. Never holds up or breaks the
+// Its own card in #report, under the copy check: built in this browser from the chain (our API gives the launch row),
+// with progress, then the wallet links separately, after the report is on screen. Never holds up or breaks the
 // blame card or the copy check: if the API can't be reached it says so in one grey line, with "Try again".
 let reportSeq = 0;
 let reportFor = null;                           // the coin on screen (or on its way), so tab switches don't re-ask

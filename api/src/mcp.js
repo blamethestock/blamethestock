@@ -4,6 +4,14 @@
 //   check_copycats({ query })        Pons coins with the same (or a look-alike) name, with facts and flags
 //   launch_report({ token })         what a coin's dev and first buyers did; wallet links as a separate field
 //
+// Hosted (the API Worker on Cloudflare) the tools can't read Robinhood Chain: its official RPC answers HTTP 429 to
+// every call from Cloudflare's network. So there (options.hosted):
+//   check_copycats  the same-name launches from the launch index (launch time, tx, dev wallet hints, proof links)
+//                   plus a note that the chain facts and flags are read by the website or the local package;
+//   launch_report   the coin's launch basics from the index plus the same note;
+//   blame_split     a note pointing to the website card and the local package (it needs prices at exact blocks).
+// The local package (mcp/, npx blamethestock-mcp) runs these same runners with full facts read on the user's machine.
+//
 // Every tool answers with a short plain-text summary, the same facts as JSON (a second text block and
 // structuredContent), and Blockscout proof links. Nothing here writes to the chain, asks for a wallet or gives
 // advice. Errors come back as a plain message (isError), never a crash.
@@ -43,6 +51,10 @@ export const SERVER_VERSION = '0.1.0';
 export const SITE = 'https://blamethestock.com';
 export const NOT_ADVICE = 'Read-only on-chain facts from Robinhood Chain; not financial advice.';
 export const LINKS_CAVEAT = 'Wallets funded through exchanges, bridges or privacy tools can\'t be linked.';
+export const LOCAL_PACKAGE = 'npx -y blamethestock-mcp';
+export const HOSTED_NOTE = 'The hosted server can\'t read Robinhood Chain right now (its public RPC refuses Cloudflare\'s network), so '
+  + 'this answer comes from our launch index only. For the full facts and flags, open ' + SITE + ' (your browser reads the chain) '
+  + 'or run the local package (' + LOCAL_PACKAGE + '), which reads the chain on your machine.';
 const SPLIT_CACHE_SECONDS = 60;
 const WINDOWS = Object.keys(WINDOW_SECONDS);   // ['1h', '6h', '24h', '7d']
 const MAX_TEXT_ROWS = 8;                       // matches / moves / wallets listed in the text summary (JSON has all)
@@ -237,6 +249,17 @@ export async function runBlameSplit({ token, window } = {}, deps = {}) {
   const w = normalizeWindow(window);
   if (!w) return toolError('Unknown window. Use one of: ' + WINDOWS.join(', ') + '.', { code: 'bad-window' });
   const settings = deps.settings || SETTINGS;
+  if (deps.hosted) {
+    // Measured from a Worker: with the official RPC refusing Cloudflare, the price reads at exact blocks fail
+    // (publicnode keeps only the newest blocks, dRPC caps logs at 100 blocks). Say so instead of failing slowly.
+    const link = SITE + '/?ca=' + addr + '&w=' + w;
+    const json = { ok: false, status: 'unavailable-hosted', token: addr, window: w, link, localPackage: LOCAL_PACKAGE,
+      message: 'blame_split needs prices read from Robinhood Chain at exact blocks, which the hosted server can\'t do right now.',
+      note: HOSTED_NOTE, disclaimer: NOT_ADVICE };
+    const text = json.message + ' Open the card on the website: ' + link + ' (your browser reads the chain), or run the local package ('
+      + LOCAL_PACKAGE + ') for the same answer here. ' + NOT_ADVICE;
+    return toolResult(text, json);
+  }
 
   const cacheKey = 'https://api.blamethestock.com/__mcp/split/' + addr + '/' + w;
   const cached = await cacheGet(deps, cacheKey);
@@ -301,6 +324,7 @@ function matchLine(m, i) {
   if (m.holders && isNum(m.holders.count)) facts.push(plural(m.holders.count, 'holder', 'holders'));
   if (m.liquidity && isNum(m.liquidity.usd)) facts.push('liquidity ' + usdText(m.liquidity.usd));
   const flags = (m.flags || []).map((f) => (f.severity === 'warn' ? 'FLAG: ' : 'Info: ') + f.text);
+  if (m.pending) facts.push('launch block ' + (m.launch && m.launch.block) + '; chain facts not read here');
   return [head, '   ' + (facts.join('; ') || 'facts unavailable right now') + '.', ...flags.map((f) => '   ' + f),
     '   Proof: ' + [m.proof && m.proof.token, m.proof && m.proof.launchTx].filter(Boolean).join(' ')].join('\n');
 }
@@ -308,7 +332,9 @@ function matchLine(m, i) {
 export function copiesSummary(r) {
   const q = r.query || {};
   const what = q.kind === 'address' ? (q.symbol || short(q.address)) + ' (' + q.address + ')' : '"' + (q.input || '') + '"';
-  const lines = ['Copy check for ' + what + (r.asOf ? ', facts as of ' + utc(r.asOf) : '') + ':', r.verdict];
+  const fromIndex = r.facts === 'client' || r.facts === 'pending';
+  const lines = ['Copy check for ' + what + (r.asOf ? ', facts as of ' + utc(r.asOf) : fromIndex && r.indexAsOf ? ', launch index as of ' + utc(r.indexAsOf) : '') + ':', r.verdict];
+  if (fromIndex) lines.push('Note: ' + HOSTED_NOTE);
   if (r.indexComplete === false && r.indexedFrom) lines.push('Searching Pons launches since ' + (utc(r.indexedFrom) || r.indexedFrom) + ' (older history is still being added).');
   if (r.official) lines.push('Official $' + r.official.symbol + ': ' + r.official.address + ' ' + tokenUrl(r.official.address));
   const ms = r.matches || [];
@@ -344,7 +370,8 @@ export async function runCheckCopycats({ query } = {}, deps = {}) {
     return toolError((r && r.message) || 'The copy check is unavailable right now. Try again in a minute.', { code: (r && r.code) || 'unavailable' });
   }
   if (r.status === 'building') return buildingResult('check_copycats', r.progress, { query: q });
-  return toolResult(copiesSummary(r), { ...r, disclaimer: NOT_ADVICE });
+  const json = r.facts === 'client' || r.facts === 'pending' ? { ...r, note: HOSTED_NOTE, localPackage: LOCAL_PACKAGE, disclaimer: NOT_ADVICE } : { ...r, disclaimer: NOT_ADVICE };
+  return toolResult(copiesSummary(r), json);
 }
 
 // =============================================================================================================
@@ -472,6 +499,27 @@ export function reportSummary(r, links, linksStatus) {
   return lines.join('\n');
 }
 
+// The hosted answer: the coin's launch from the index, and where to get the full report.
+export function basicsSummary(b) {
+  const t = b.token || {};
+  const p = t.pons || {};
+  const sym = t.symbol || short(t.address);
+  const lines = [];
+  if (b.inIndex === false) {
+    lines.push('Launch report for ' + t.address + ': this coin isn\'t in our launch index (yet, or it wasn\'t launched on Pons).');
+  } else {
+    lines.push('Launch basics for ' + sym + (t.name && t.name !== t.symbol ? ' (' + t.name + ')' : '') + ' ' + t.address + (t.isOfficial ? ' [OFFICIAL]' : '') + '.');
+    lines.push('Launch: ' + (utc(p.launchTime) || '?') + ', block ' + (p.launchBlock != null ? p.launchBlock : '?') + (proofTx(p.launchTx) ? ' ' + proofTx(p.launchTx) : ''));
+    const l = b.launch || {};
+    const launcher = l.creator === '0xca11bde05977b3631167028862be2a173976ca11' ? l.tx_from : l.creator;
+    if (isAddr(launcher)) lines.push('Launched by ' + launcher + ' ' + proofAddr(launcher));
+  }
+  lines.push('Note: ' + HOSTED_NOTE);
+  lines.push(LINKS_CAVEAT);
+  lines.push(NOT_ADVICE);
+  return lines.join('\n');
+}
+
 export async function runLaunchReport({ token } = {}, deps = {}) {
   const addr = validateAddress(String(token == null ? '' : token));
   if (!addr) return toolError('That isn\'t a coin address. Paste a Pons coin address: 0x followed by 40 letters or numbers.', { code: 'bad-address' });
@@ -492,6 +540,10 @@ export async function runLaunchReport({ token } = {}, deps = {}) {
     return toolError((report && report.message) || 'The launch report is unavailable right now. Try again in a minute.', { code: (report && report.code) || 'unavailable' });
   }
   if (report.status === 'building') return buildingResult('launch_report', report.progress, { token: addr, links: null, links_status: 'building' });
+  if (report.status === 'basics') {
+    const json = { ...report, links: null, links_status: 'client', note: HOSTED_NOTE, localPackage: LOCAL_PACKAGE, disclaimer: NOT_ADVICE };
+    return toolResult(basicsSummary(report), json);
+  }
 
   // Wallet links: separate, never blocks or breaks the report.
   let links = null, linksStatus = 'unavailable';
@@ -585,6 +637,7 @@ export async function handleMcp(request, env, ctx, options = {}) {
     budget: options.budget || createBudget(),
     now: options.now || Date.now(),
     api: options.api || null,
+    hosted: options.hosted !== undefined ? !!options.hosted : !!options.api,   // the Worker always passes its routes
   };
   if (options.fetch) deps.fetch = options.fetch;
   for (const k of ['launchReport', 'walletLinks', 'copyCheck', 'fetchPriceInput', 'cache']) if (options[k] !== undefined) deps[k] = options[k];

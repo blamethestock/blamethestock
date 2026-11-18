@@ -112,7 +112,11 @@ export function normalizeRow(row) {
 }
 
 // ---- explorer (Blockscout) ----------------------------------------------------------------------------------
-export function makeExplorer({ fetch: fetchFn, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), base = EXPLORER } = {}) {
+// A web page can't set User-Agent (some browsers drop it, others make it a CORS preflight): the generic one is
+// sent only outside a page (the Worker, the local MCP package, tests).
+const IN_PAGE = typeof window !== 'undefined' && typeof document !== 'undefined';
+export function makeExplorer({ fetch: fetchFn, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), base = EXPLORER, userAgent = IN_PAGE ? null : EXPLORER_UA } = {}) {
+  const headers = userAgent ? { accept: 'application/json', 'user-agent': userAgent } : { accept: 'application/json' };
   let down = false;
   const cache = new Map();
   async function get(path) {
@@ -121,7 +125,7 @@ export function makeExplorer({ fetch: fetchFn, sleep = (ms) => new Promise((r) =
     for (let attempt = 0; attempt < 2; attempt++) {
       let res;
       try {
-        res = await fetchFn(base + path, { method: 'GET', headers: { accept: 'application/json', 'user-agent': EXPLORER_UA } });
+        res = await fetchFn(base + path, { method: 'GET', headers });
       } catch (e) {
         if (attempt === 0) { await sleep(1000); continue; }
         break;

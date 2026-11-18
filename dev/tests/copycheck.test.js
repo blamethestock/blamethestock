@@ -577,7 +577,7 @@ test('D1 index: one placeholder per key, bound once, rows and state read back', 
   ok(/WHERE sym_skel IN \(\?1, \?2, \?3\) OR name_skel IN \(\?1, \?2, \?3\)/.test(q.sql), q.sql);
   eq(q.args, ['blame', 'blam', 'b1ame']);
   ok(/LIMIT 500$/.test(q.sql));
-  eq(await ix.state(), { lastBlock: 117000000, oldestBlock: 20000000, lastRun: 1794990000, oldestTime: 1780000000 });
+  eq(await ix.state(), { lastBlock: 117000000, oldestBlock: 20000000, lastRun: 1794990000, oldestTime: 1780000000, lastBlockTime: null });
   eq(await ix.findByToken(ad(1)), null);
 });
 

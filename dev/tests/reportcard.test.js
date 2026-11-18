@@ -1,10 +1,10 @@
-// Launch report card: the words and links it shows (reportView / linksView, no page needed), the API calls and the
-// polling while the API builds the report (fake fetch, no timers), the drawn card on a tiny stand-in page (text only,
+// Launch report card: the words and links it shows (reportView / linksView, no page needed), the API's launch row
+// and the report built in the browser (fake fetch and builders, no timers), the drawn card on a tiny stand-in page (text only,
 // every link a Blockscout proof), and the settings/page wiring.
 // The OBSYN reports are the real report and wallet links replayed offline (dev/tests/fixtures/obsyn/report-*.json).
 import { suite, test, eq, ok } from './harness.js';
 import {
-  reportView, linksView, linkedVerdict, checkReport, checkLinks, fetchReport, fetchLinks, loadReport, errorText, retryable,
+  reportView, linksView, linkedVerdict, checkReport, checkLinks, checkBasics, fetchBasics, loadReport, loadLinks, errorText, retryable,
   renderReport, renderReportLoading, renderLinks, showReport, tokensText, pctText, words, MAX_WAIT_MS,
 } from '../../site/src/ui/report-card.js';
 import { SETTINGS } from '../../site/settings.js';
@@ -206,42 +206,61 @@ test('answers: only the contract\'s shapes get through', () => {
   eq(checkLinks({ ok: true, status: 'done' }), null, 'no funders/links arrays');
 });
 
-test('fetchReport / fetchLinks: the right URL, no cookies; busy or broken answers are "unreachable" (null)', async () => {
-  const f = fakeFetch([{ body: { ok: true, status: 'building', progress: 0.3 } }]);
-  eq((await fetchReport(TOKEN, SETTINGS, { fetch: f })).progress, 0.3);
+const BASICS = {
+  ok: true, status: 'basics', clientSide: true, inIndex: true,
+  token: { address: TOKEN.toLowerCase(), symbol: 'OBSYN' },
+  launch: { token: TOKEN.toLowerCase(), factory: '0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e', curve: '0x' + 'c'.repeat(40), creator: '0x' + 'd'.repeat(40),
+    tx_from: null, pair_token: '0x0000000000000000000000000000000000000000', block: 116825000, log_index: 3, time: 1794924840, tx: '0x' + 'a'.repeat(64), name: 'Obsyn', symbol: 'OBSYN' },
+  note: 'n',
+};
+
+test('fetchBasics: GET {apiBase}/v1/report/{token}, no cookies; only this coin\'s launch row gets through', async () => {
+  const f = fakeFetch([{ body: BASICS }]);
+  const b = await fetchBasics(TOKEN, SETTINGS, { fetch: f });
   eq(f.calls[0].url, 'https://api.blamethestock.com/v1/report/0x5d992fa5b7da8efde5fd36d24e81097ed6ad4351');
   eq(f.calls[0].init.credentials, 'omit');
-  await fetchLinks(TOKEN, SETTINGS, { fetch: f });
-  eq(f.calls[1].url, 'https://api.blamethestock.com/v1/report/0x5d992fa5b7da8efde5fd36d24e81097ed6ad4351/links');
-  eq(await fetchReport(TOKEN, SETTINGS, { fetch: fakeFetch([{ status: 429, body: { ok: false, code: 'rate-limited' } }]) }), null);
-  eq(await fetchReport(TOKEN, SETTINGS, { fetch: fakeFetch([{ status: 502 }]) }), null, 'not JSON');
-  eq(await fetchReport(TOKEN, SETTINGS, { fetch: fakeFetch([new Error('offline')]) }), null);
+  eq(b.launch.block, 116825000);
+  eq(b.launch.token, TOKEN.toLowerCase());
+  eq(await fetchBasics(TOKEN, SETTINGS, { fetch: fakeFetch([{ status: 429, body: { ok: false, code: 'rate-limited' } }]) }), null);
+  eq(await fetchBasics(TOKEN, SETTINGS, { fetch: fakeFetch([{ status: 502 }]) }), null, 'not JSON');
+  eq(await fetchBasics(TOKEN, SETTINGS, { fetch: fakeFetch([new Error('offline')]) }), null);
+  eq(checkBasics({ ...BASICS, launch: { ...BASICS.launch, token: '0x' + '1'.repeat(40) } }, TOKEN), null, 'another coin\'s row');
+  eq(checkBasics({ ...BASICS, launch: { ...BASICS.launch, tx: 'javascript:1' } }, TOKEN), null);
+  eq(checkBasics({ ...BASICS, inIndex: false, launch: null }, TOKEN), null, 'not in the index: read from the chain instead');
   const none = fakeFetch([{ body: {} }]);
-  eq(await fetchReport('0x123', SETTINGS, { fetch: none }), null);
-  eq(await fetchReport(TOKEN, { trust: { apiBase: 'http://example.com' } }, { fetch: none }), null, 'https only');
+  eq(await fetchBasics('0x123', SETTINGS, { fetch: none }), null);
+  eq(await fetchBasics(TOKEN, { trust: { apiBase: 'http://example.com' } }, { fetch: none }), null, 'https only');
   eq(none.calls.length, 0);
 });
 
-test('polling: asks again while "building" (progress shown, the API\'s wait respected), stops when done, cancelled or too long', async () => {
-  const done = { ok: true, status: 'done', token: { address: TOKEN } };
-  const f = fakeFetch([{ status: 202, body: { ok: true, status: 'building', progress: 0.2, retryAfterSeconds: 2 } },
-    { status: 202, body: { ok: true, status: 'building', progress: 0.6, retryAfterSeconds: 3 } }, { body: done }]);
-  const slept = [], seen = [];
-  const res = await loadReport(TOKEN, SETTINGS, { fetch: f, sleep: async (ms) => { slept.push(ms); }, onProgress: (p) => seen.push(p) });
+test('local build: the API\'s launch row is handed to the builder, progress shown, the answer checked; cancelled or too long', async () => {
+  const done = { ok: true, status: 'done', token: { address: TOKEN.toLowerCase() } };
+  const seen = [];
+  let got = null;
+  const buildReport = async (token, o) => { got = { token, basics: o.basics }; o.onProgress(0.2); o.onProgress(0.6); return done; };
+  const res = await loadReport(TOKEN, SETTINGS, { fetch: fakeFetch([{ body: BASICS }]), buildReport, onProgress: (p) => seen.push(p) });
   eq(res.status, 'done');
   eq(seen, [0.2, 0.6]);
-  eq(slept, [2000, 3000]);
-  // too long
-  const slow = fakeFetch([{ status: 202, body: { ok: true, status: 'building', progress: 0.1, retryAfterSeconds: 10 } }]);
-  let total = 0;
-  const late = await loadReport(TOKEN, SETTINGS, { fetch: slow, sleep: async (ms) => { total += ms; } });
+  eq(got.token, TOKEN.toLowerCase());
+  eq(got.basics.launch.block, 116825000);
+  // the API unreachable: the builder still runs (it reads the launch from the chain)
+  const r2 = await loadReport(TOKEN, SETTINGS, { fetch: fakeFetch([new Error('offline')]), buildReport: async (t, o) => { ok(o.basics === null); return done; } });
+  eq(r2.status, 'done');
+  // too long: the builder is told to stop (live() turns false), the card says it's still being built
+  const late = await loadReport(TOKEN, SETTINGS, { fetch: fakeFetch([{ body: BASICS }]), maxWaitMs: -1, buildReport: async (t, o) => (o.live() ? done : undefined) });
   eq(late, { ok: false, code: 'still-building' });
-  ok(total <= MAX_WAIT_MS && total >= MAX_WAIT_MS - 10000, String(total));
   eq(errorText(late, SETTINGS), 'The launch report is still being built.');
   // a newer lookup took over
   let alive = true;
-  const gone = await loadReport(TOKEN, SETTINGS, { fetch: slow, sleep: async () => { alive = false; }, live: () => alive });
+  const gone = await loadReport(TOKEN, SETTINGS, { fetch: fakeFetch([{ body: BASICS }]), live: () => alive, buildReport: async () => { alive = false; return done; } });
   eq(gone, undefined);
+  // errors from the builder keep their code; a throw is "unreachable" (null)
+  eq((await loadReport(TOKEN, SETTINGS, { fetch: fakeFetch([{ body: BASICS }]), buildReport: async () => ({ ok: false, code: 'not-pons', message: 'x' }) })).code, 'not-pons');
+  eq(await loadReport(TOKEN, SETTINGS, { fetch: fakeFetch([{ body: BASICS }]), buildReport: async () => { throw new Error('x'); } }), null);
+  // links: done passes, anything still building or broken is "unavailable" (the card offers a retry)
+  eq((await loadLinks(TOKEN, SETTINGS, { buildLinks: async () => ({ ok: true, status: 'done', funders: [], links: [] }) })).status, 'done');
+  eq(await loadLinks(TOKEN, SETTINGS, { buildLinks: async () => ({ ok: true, status: 'building', progress: 0.5 }) }), { ok: true, status: 'unavailable' });
+  eq(await loadLinks(TOKEN, SETTINGS, { buildLinks: async () => ({ ok: false, code: 'unavailable' }) }), { ok: true, status: 'unavailable' });
 });
 
 test('errors: settings words first; only busy errors offer "Try again"', () => {
@@ -363,24 +382,18 @@ test('drawn states: building updates in place; errors are one grey line, with "T
 test('whole flow: building -> report drawn -> links checked after it; links unavailable -> Try again -> links drawn', async () => {
   const { again, links } = await obsyn('real OBSYN');
   const seen = [];
-  const answers = [
-    { status: 202, body: { ok: true, status: 'building', progress: 0.5, retryAfterSeconds: 2 } },
-    { body: again },
-    { body: { ok: true, status: 'unavailable' } },
-    { body: links },
-  ];
-  const f = async (url) => {
-    seen.push(url.replace('https://api.blamethestock.com', ''));
-    const a = answers.shift();
-    return { status: a.status || 200, json: async () => a.body };
-  };
+  const f = async (url) => { seen.push(url.replace('https://api.blamethestock.com', '')); return { status: 200, json: async () => BASICS }; };
+  const linkAnswers = [{ ok: true, status: 'unavailable' }, links];
+  let built = 0;
+  const buildReport = async (token, o) => { seen.push('build report'); o.onProgress(0.5); built++; return again; };
+  const buildLinks = async () => { seen.push('build links'); return linkAnswers.shift(); };
   await withDoc(async (mount) => {
     let reportShown = 0;
-    const res = await showReport(mount, TOKEN, SETTINGS, { fetch: f, sleep: async () => {}, timeZone: NY.timeZone, onReport: () => { reportShown++; } });
+    const res = await showReport(mount, TOKEN, SETTINGS, { fetch: f, buildReport, buildLinks, sleep: async () => {}, timeZone: NY.timeZone, onReport: () => { reportShown++; } });
     eq(res.status, 'done');
     eq(reportShown, 1);
-    const tok = TOKEN.toLowerCase();
-    eq(seen, ['/v1/report/' + tok, '/v1/report/' + tok, '/v1/report/' + tok + '/links'], 'links only after the report');
+    eq(built, 1);
+    eq(seen, ['/v1/report/' + TOKEN.toLowerCase(), 'build report', 'build links'], 'links only after the report');
     const c = mount.firstElementChild;
     eq(c.querySelector('.rc-links').getAttribute('data-state'), 'unavailable');
     const btn = c.querySelector('.rc-links').querySelector('button');
@@ -395,9 +408,10 @@ test('whole flow: building -> report drawn -> links checked after it; links unav
 
 test('whole flow: a newer lookup stops it (nothing more drawn)', async () => {
   let alive = true;
-  const f = async () => { alive = false; return { status: 202, json: async () => ({ ok: true, status: 'building', progress: 0.1 }) }; };
+  const f = async () => ({ status: 200, json: async () => BASICS });
+  const buildReport = async (t, o) => { alive = false; o.onProgress(0.1); return { ok: true, status: 'done', token: { address: TOKEN.toLowerCase() } }; };
   await withDoc(async (mount) => {
-    const res = await showReport(mount, TOKEN, SETTINGS, { fetch: f, sleep: async () => {}, live: () => alive });
+    const res = await showReport(mount, TOKEN, SETTINGS, { fetch: f, buildReport, sleep: async () => {}, live: () => alive });
     eq(res, undefined);
     eq(mount.firstElementChild.getAttribute('data-state'), 'loading', 'still the first drawing');
   });

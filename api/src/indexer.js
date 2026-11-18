@@ -1,7 +1,15 @@
 // The launch indexer: reads TokenLaunched events from every Pons factory, adds what the event lacks
 // (the real dev for Multicall3 launches, name()/symbol(), block time), and upserts one row per launch into D1.
 //
-//   runIndexer(env, { fromBlock?, maxBlocks?, maxRows?, head?, log? }) -> summary
+//   runIndexer(env, { fromBlock?, maxBlocks?, maxRows?, head?, log?, logSpan?, maxLogRequests? }) -> summary
+//
+// Two ways to read the TokenLaunched logs:
+//  - default (local tools, tests): the official node, long ranges (it allows 100k blocks for a list of addresses);
+//  - logSpan set (the API Worker's cron): dRPC in pieces of at most logSpan blocks (its free plan allows 100 blocks
+//    per eth_getLogs and 3 calls per batch), at most maxLogRequests HTTP requests per run. The official node is
+//    only a last resort there: it answers HTTP 429 to every call from Cloudflare's network. A run that can't
+//    read a piece stops at the last block it fully read, so the cursor never skips anything, and the next runs
+//    catch up (about 575 new blocks a minute; a run reads up to logSpan x 3 x maxLogRequests blocks).
 //
 // env.DB is a D1 database (prepare/bind/all/first/run/batch). Chain reads go through the site's rpc.js
 // (retries, 429 backoff, endpoint cooling); tests swap the network with rpc.js _setTransport and pass a fake DB.
@@ -185,6 +193,49 @@ export async function fetchLaunchLogs(addresses, from, to) {
   return out;
 }
 
+// Chunked reading (the Worker): every factory's TokenLaunched logs in [from, to], `span` blocks per eth_getLogs, three
+// calls per batch request on dRPC (its free plan's batch limit), at most maxRequests requests. A batch dRPC can't
+// answer is asked once on the official node (last resort). Stops early, at a batch edge, once maxLogs launches
+// were seen. -> { logs, to: last block fully read (from - 1 when nothing was), requests }
+export const CHUNK_BATCH = 3;
+export async function fetchLaunchLogsChunked(addresses, from, to, { span = 100, maxRequests = 20, maxLogs = Infinity } = {}) {
+  const topics = [E.TOPIC_TOKEN_LAUNCHED];
+  const pieces = [];
+  for (let a = from; a <= to; a += span) pieces.push([a, Math.min(to, a + span - 1)]);
+  const out = { logs: [], to: from - 1, requests: 0 };
+  for (let i = 0; i < pieces.length; i += CHUNK_BATCH) {
+    if (out.requests >= maxRequests || out.logs.length >= maxLogs) break;
+    const group = pieces.slice(i, i + CHUNK_BATCH);
+    const calls = group.map(([a, b]) => ({ method: 'eth_getLogs', params: [{ address: addresses, topics, fromBlock: toHex(a), toBlock: toHex(b) }] }));
+    let got = null;
+    for (const [ep, tries] of [['drpc', 2], ['official', 1]]) {
+      if (out.requests >= maxRequests) break;
+      out.requests++;
+      try {
+        const res = await rpcBatch(ep, calls, { tries });
+        if (res.every((r) => r && Array.isArray(r.result) && r.result.length < E.LOG_CAP)) { got = res.map((r) => r.result); break; }
+      } catch (e) { /* next node */ }
+    }
+    if (!got) {
+      if (out.to < from) throw new RpcError('no node answered eth_getLogs for blocks ' + from + '-' + group[group.length - 1][1]);
+      break;                                  // keep what was read; the next run carries on from here
+    }
+    for (const list of got) out.logs.push(...list);
+    out.to = group[group.length - 1][1];
+  }
+  return out;
+}
+
+// Block times for the Worker: dRPC first (archive; publicnode only knows the last ~100 blocks), then the usual order.
+async function launchTimes(blocks, chunked) {
+  if (!chunked || !blocks.length) return blockTimes(blocks);
+  try {
+    const res = await rpcBatch('drpc', blocks.map((b) => ({ method: 'eth_getBlockByNumber', params: [toHex(b), false] })), { tries: 2 });
+    if (res.every((r) => r && r.result && r.result.timestamp)) return res.map((r) => parseInt(r.result.timestamp, 16));
+  } catch (e) { /* the usual order below */ }
+  return blockTimes(blocks);
+}
+
 // tx hash -> sender, for launches whose creator is Multicall3. Missing entries were not answered.
 export async function fetchTxFrom(hashes) {
   const out = new Map();
@@ -334,7 +385,8 @@ export async function runIndexer(env, opts = {}) {
   const db = env && env.DB;
   if (!db || typeof db.prepare !== 'function') throw new Error('DB binding missing');
   const { fromBlock = null, maxBlocks = E.DEFAULT_MAX_BLOCKS, maxRows = E.DEFAULT_MAX_ROWS, head = null,
-    log = () => {}, now = () => Date.now(), pending = true } = opts;
+    log = () => {}, now = () => Date.now(), pending = true, logSpan = null, maxLogRequests = 20 } = opts;
+  const chunked = Number.isFinite(logSpan) && logSpan > 0;
   const started = now();
   const meta = await readMeta(db);
   const headNumber = head !== null ? Number(head) : (await headBlock()).number;
@@ -347,7 +399,13 @@ export async function runIndexer(env, opts = {}) {
   if (from > settled) { summary.upToDate = true; summary.ms = now() - started; return summary; }
   let to = Math.min(settled, from + Math.max(1, maxBlocks) - 1);
 
-  const logs = await fetchLaunchLogs(E.FACTORY_ADDRESSES, from, to);
+  let logs;
+  if (chunked) {
+    const got = await fetchLaunchLogsChunked(E.FACTORY_ADDRESSES, from, to, { span: logSpan, maxRequests: maxLogRequests, maxLogs: maxRows });
+    logs = got.logs;
+    to = got.to;
+    summary.logRequests = got.requests;
+  } else logs = await fetchLaunchLogs(E.FACTORY_ADDRESSES, from, to);
   const seen = new Set();
   let launches = logs.map(decodeLaunchLog).filter((l) => l && !seen.has(l.token) && seen.add(l.token))
     .sort((a, b) => a.block - b.block || a.log_index - b.log_index);
@@ -365,7 +423,7 @@ export async function runIndexer(env, opts = {}) {
     summary.viaMulticall = viaMc.length;
     const names = await readNames(launches.map((l) => l.token), to);
     const blocks = [...new Set(launches.map((l) => l.block))];
-    const times = await blockTimes(blocks);
+    const times = await launchTimes(blocks, chunked);
     const timeOf = new Map(blocks.map((b, i) => [b, times[i]]));
     const rows = launches.map((l) => {
       const n = names.get(l.token);

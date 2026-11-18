@@ -1,11 +1,12 @@
 # Safety rules Cloudflare sends with every page and file of this site.
 # - The site can't be shown inside another website (stops scam pages from framing it).
-# - The page may only run its own code, and only talk to Robinhood Chain, the two pool-search services and our own
-#   copy-check API (api.blamethestock.com).
+# - The page may only run its own code, and only talk to Robinhood Chain (its three RPC nodes and its block explorer,
+#   which the browser reads for the copy check, the launch report and the wallet links), the two pool-search
+#   services and our own API (api.blamethestock.com, the launch index).
 # - Always https; no camera, microphone, location or payments.
 # If you ever add a new outside service, add its address to connect-src below or the site won't reach it.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https://rpc.mainnet.chain.robinhood.com https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://api.dexscreener.com https://api.geckoterminal.com https://api.blamethestock.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https://rpc.mainnet.chain.robinhood.com https://robinhood-rpc.publicnode.com https://robinhood.drpc.org https://robinhoodchain.blockscout.com https://api.dexscreener.com https://api.geckoterminal.com https://api.blamethestock.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin

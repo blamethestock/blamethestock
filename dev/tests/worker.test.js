@@ -3,7 +3,8 @@
 import { suite, test, eq, ok } from './harness.js';
 import worker from '../../api/src/worker.js';
 import { createBudget, refusal, isRefusal, wrapDb, BudgetExceeded } from '../../api/src/budget.js';
-import { _setTransport } from '../../site/src/data/rpc.js';
+import { _setTransport, byHealth } from '../../site/src/data/rpc.js';
+import { runCopyCheck } from '../../site/src/trust/copycheck.js';
 import { loadFixture, replayFetch, fixtureIndex, runScenario, OBSYN } from './fixtures/obsyn/replay.js';
 
 const W = worker.internals;
@@ -25,15 +26,6 @@ function fakeD1({ meta = {}, oldest = null } = {}) {
       case W.SQL_CACHE_GET: { const r = cache.get(a[0]); return { results: r && r.expires > a[1] ? [{ body: r.body }] : [] }; }
       case W.SQL_CACHE_PUT: cache.set(a[0], { body: a[1], expires: a[2] }); return { results: [] };
       case W.SQL_CACHE_PURGE: for (const [k, v] of [...cache]) if (v.expires <= a[0]) cache.delete(k); return { results: [] };
-      case W.SQL_JOB_UPSERT: {
-        const j = jobs.get(a[0]);
-        if (j) j.progress = a[4];
-        else jobs.set(a[0], { key: a[0], kind: a[1], token: a[2], created: a[3], touched: a[3], attempts: 0, progress: a[4] });
-        return { results: [] };
-      }
-      case W.SQL_JOBS_NEXT: return { results: [...jobs.values()].sort((x, y) => x.touched - y.touched).slice(0, a[0]).map((j) => ({ ...j })) };
-      case W.SQL_JOB_TOUCH: { const j = jobs.get(a[0]); if (j) { j.touched = a[1]; j.attempts++; j.progress = a[2]; } return { results: [] }; }
-      case W.SQL_JOB_DELETE: jobs.delete(a[0]); return { results: [] };
       case W.SQL_JOBS_PURGE: for (const [k, j] of [...jobs]) if (j.created <= a[0]) jobs.delete(k); return { results: [] };
       case W.SQL_META: return { results: Object.entries(meta).map(([key, value]) => ({ key, value: String(value) })) };
       case W.SQL_OLDEST_TIME: return { results: oldest && oldest.block >= a[0] ? [{ time: oldest.time }] : [] };
@@ -75,8 +67,8 @@ async function call(path, o = {}) {
   const budget = createBudget({ limit: o.limit || 45, d1Limit: 45, fetch: o.fetch || (async () => { throw new Error('no network in tests'); }) });
   const db = o.db ? budget.wrapDb(o.db) : null;
   const deps = {
-    now: o.now || NOW, budget, db, moduleEnv: { DB: db }, settings: o.settings || W.settingsFor({}),
-    cache: o.cache ? o.cache.bind(budget) : null, limiter: o.limiter || null, index: o.index, modules: o.modules,
+    now: o.now || NOW, budget, db, settings: o.settings || W.settingsFor({}),
+    cache: o.cache ? o.cache.bind(budget) : null, limiter: o.limiter || null, index: o.index, copyMatches: o.copyMatches,
     mcp: o.mcp, origins: o.origins,
   };
   const r = await W.withBudget(budget, () => W.handle(req(path, o), o.env || {}, null, deps));
@@ -235,35 +227,33 @@ test('bad input answers 400 before any work', async () => {
   }
 });
 
-test('OBSYN under a 45-subrequest budget: built in steps, same answer as one big run, then cached', async () => {
+test('OBSYN: the four launches from the index in one request, no chain read, marked "facts: client", then cached', async () => {
   const fx = await loadFixture();
-  const direct = JSON.parse(JSON.stringify(await runScenario({ query: 'OBSYN' }, fx)));
-  ok(direct.ok && direct.matches.length === 4, 'fixture answer');
-
-  _setTransport({ sleep: noSleep, backoff: [0], timeouts: false });
   const head = fx.index.head;
   const index = fixtureIndex(fx.index.rows, { lastBlock: head.number, lastRun: head.time });
   const db = fakeD1();
   const cache = fakeCache();
-  const seen = [];
-  let r;
-  for (let i = 0; i < 10; i++) {
-    r = await call('/v1/copies?q=OBSYN', { db, cache, index, fetch: replayFetch(fx), now: head.time * 1000 });
-    seen.push(r.status);
-    ok(r.budget.used <= 45, 'request ' + (i + 1) + ' stayed within 45 subrequests (' + r.budget.used + ')');
-    if (r.status !== 202) break;
-    eq(r.json.status, 'building');
-    eq(r.headers['cache-control'], 'no-store');
-    ok(r.json.progress >= 0 && r.json.progress < 1);
-  }
-  ok(seen.length >= 2 && seen[0] === 202, 'needed more than one request: ' + seen.join(','));
+  const noNet = async () => { throw new Error('the Worker must not read the chain for a copy check'); };
+  const r = await call('/v1/copies?q=OBSYN', { db, cache, index, fetch: noNet, now: head.time * 1000 });
   eq(r.status, 200);
   eq(r.json.status, 'done');
-  const { status, ...rest } = r.json;
-  eq(JSON.stringify(rest), JSON.stringify(direct), 'staged answer equals the direct one');
-  ok(r.json.verdict.length > 0);
+  eq(r.json.facts, 'client');
+  ok(/browser/.test(r.json.factsNote) && /npx blamethestock-mcp/.test(r.json.factsNote), r.json.factsNote);
+  eq(r.json.matches.length, 4);
+  eq(r.json.totals, { exact: 4, near: 0, total: 4, listed: 4 });
+  eq(r.budget.used, 2, 'one Cache API read and one write: nothing from the chain');
+  const copy = r.json.matches.find((m) => m.address === OBSYN.copy);
+  ok(copy && copy.pending === true && copy.match === 'exact' && copy.isOfficial === false);
+  ok(/^0x[0-9a-f]{64}$/.test(copy.launch.tx) && Number.isFinite(copy.launch.block) && /Z$/.test(copy.launch.time));
+  ok(/^0x[0-9a-f]{40}$/.test(copy.launchCreator) && /^0x[0-9a-f]{40}$/.test(copy.curve) && /^0x[0-9a-f]{40}$/.test(copy.factory));
+  eq(copy.pairToken, '0x0000000000000000000000000000000000000000');
+  eq(copy.creator, null, 'the dev wallet is read from the launch transaction, in the browser');
+  ok(copy.missing.includes('devBuy') && copy.flags.length === 0);
+  ok(/robinhoodchain\.blockscout\.com\/tx\//.test(copy.proof.launchTx) && /\/token\//.test(copy.proof.token));
+  eq(r.json.verdict, '4 Pons coins use this name.');
+  ok(r.json.caveats.some((c) => /Pons launches only/.test(c)));
 
-  const again = await call('/v1/copies?q=OBSYN', { db, cache, index, fetch: async () => { throw new Error('should not fetch'); }, now: head.time * 1000 });
+  const again = await call('/v1/copies?q=OBSYN', { db, cache, index, fetch: noNet, now: head.time * 1000 });
   eq(again.status, 200);
   eq(again.json.matches.length, 4);
   eq(again.budget.used, 1, 'one Cache API read, nothing else');
@@ -271,13 +261,42 @@ test('OBSYN under a 45-subrequest budget: built in steps, same answer as one big
   ok(db.cache.has('copies:OBSYN'), 'also kept in D1 for other data centres');
 });
 
+test('the browser\'s list + its own chain read give the same answer as reading everything in one place', async () => {
+  const fx = await loadFixture();
+  const direct = JSON.parse(JSON.stringify(await runScenario({ query: 'OBSYN' }, fx)));
+  const head = fx.index.head;
+  const index = fixtureIndex(fx.index.rows, { lastBlock: head.number, lastRun: head.time });
+  const listing = (await call('/v1/copies?q=OBSYN', { db: fakeD1(), index, now: head.time * 1000 })).json;
+  const fetchFn = replayFetch(fx);
+  _setTransport({ fetch: fetchFn, sleep: noSleep, backoff: [0], timeouts: false });
+  const progress = [];
+  const r = await runCopyCheck('OBSYN', { api: async () => listing, fetch: fetchFn, sleep: noSleep, onProgress: (p) => progress.push(p.reading) });
+  eq(JSON.stringify(r), JSON.stringify(direct), 'same CopyCheckResult');
+  eq(progress[0], { done: 0, total: 4 });
+  eq(progress[progress.length - 1], { done: 4, total: 4 });
+});
+
+test('an address the index doesn\'t have: the browser\'s name/symbol hint lists the same-name launches', async () => {
+  const fx = await loadFixture();
+  const head = fx.index.head;
+  const index = fixtureIndex(fx.index.rows, { lastBlock: head.number, lastRun: head.time });
+  const other = '0x00000000000000000000000000000000000000aa';
+  const plain = await call('/v1/copies?q=' + other, { db: fakeD1(), index, now: head.time * 1000 });
+  eq(plain.json.query.inIndex, false);
+  eq(plain.json.query.isPons, null, 'unknown until the chain is read');
+  eq(plain.json.matches.length, 0);
+  const hinted = await call('/v1/copies?q=' + other + '&name=Obsyn&symbol=OBSYN', { db: fakeD1(), index, now: head.time * 1000 });
+  eq(hinted.json.matches.length, 4);
+  eq(hinted.json.query.isPons, false);
+  eq(hinted.json.query.symbol, 'OBSYN');
+});
+
 test('a ticker whose search finds nothing is answered at once and cached', async () => {
   const fx = await loadFixture();
-  _setTransport({ sleep: noSleep, backoff: [0], timeouts: false });
   const head = fx.index.head;
   const index = fixtureIndex(fx.index.rows, { lastBlock: head.number, lastRun: head.time });
   const db = fakeD1();
-  const r = await call('/v1/copies?q=ZZQXNOTHING', { db, index, fetch: replayFetch(fx), now: head.time * 1000 });
+  const r = await call('/v1/copies?q=ZZQXNOTHING', { db, index, now: head.time * 1000 });
   eq(r.status, 200);
   eq(r.json.matches.length, 0);
   ok(db.cache.has('copies:ZZQXNOTHING'));
@@ -292,88 +311,51 @@ test('copy-check errors keep their code and are not cached', async () => {
   eq(db.cache.size, 0);
 });
 
-test('staged gather: a coin that never fits keeps its partial facts so polling always ends', async () => {
-  const budget = createBudget({ limit: 45 });
-  const db = fakeD1();
-  const stage = { total: 0, done: 0, fresh: 0, started: 0, pending: 0, partials: [] };
-  const gather = W.stagedGather({ db: budget.wrapDb(db), now: NOW, budget, gather: async () => { budget.take(budget.hardRoom()); budget.fetch('x'); return { missing: ['holders'] }; } }, stage);
-  const f = await gather({ token: '0xAB' }, {});
-  eq(f, { missing: ['holders'] });
-  eq(stage.pending, 1);
-  eq(stage.partials.length, 1);
-  eq(stage.fresh, 0);
+test('index behind (cron stalled): the list says the index is catching up', async () => {
+  const fx = await loadFixture();
+  const head = fx.index.head;
+  const index = fixtureIndex(fx.index.rows, { lastBlock: head.number, lastRun: head.time - 3600 });
+  const r = await call('/v1/copies?q=OBSYN', { db: fakeD1(), index, now: head.time * 1000 });
+  ok(r.json.notes.some((n) => /catching up/.test(n)), JSON.stringify(r.json.notes));
 });
 
 // =========================================================================================================
 suite('worker › launch report and wallet links');
 
-test('report module not there yet: 503 unavailable, nothing cached', async () => {
-  const db = fakeD1();
-  const r = await call('/v1/report/' + TOKEN, { db, modules: { report: null } });
-  eq(r.status, 503);
-  eq(r.json.code, 'unavailable');
-  eq(db.cache.size, 0);
-});
-
-test('bad token: 400 and the module is never called', async () => {
-  let called = 0;
-  const r = await call('/v1/report/0x1234', { modules: { report: async () => { called++; } } });
+test('bad token: 400', async () => {
+  const r = await call('/v1/report/0x1234', { db: fakeD1() });
   eq(r.status, 400);
   eq(r.json.code, 'bad-address');
-  eq(called, 0);
+  const l = await call('/v1/report/0x1234/links', { db: fakeD1() });
+  eq(l.status, 400);
 });
 
-test('report: building -> 202 + queued job; done -> 200 + cached, the module is not asked again', async () => {
-  const db = fakeD1();
-  const cache = fakeCache();
-  let step = 0;
-  const seen = [];
-  const report = async (args) => {
-    seen.push(args);
-    step++;
-    return step < 3 ? { ok: true, status: 'building', progress: step / 3 } : { ok: true, status: 'done', token: { address: args.token }, verdict: 'v' };
-  };
-  const a = await call('/v1/report/' + TOKEN.toUpperCase().replace('0X', '0x'), { db, cache, modules: { report } });
-  eq(a.status, 202);
-  eq(a.json.status, 'building');
-  eq(a.headers['cache-control'], 'no-store');
-  ok(db.jobs.has('report:' + TOKEN), 'job queued under the lowercase token');
-  eq(seen[0].token, TOKEN);
-  ok(seen[0].budget && typeof seen[0].budget.fetch === 'function' && seen[0].env && seen[0].env.DB, 'contract args');
-  ok(typeof seen[0].now === 'number' && seen[0].settings && seen[0].settings.trust);
-  await call('/v1/report/' + TOKEN, { db, cache, modules: { report } });
-  eq(db.jobs.get('report:' + TOKEN).progress, 2 / 3, 'the job keeps the latest progress');
-  const c = await call('/v1/report/' + TOKEN, { db, cache, modules: { report } });
-  eq(c.status, 200);
-  eq(c.json.status, 'done');
-  eq(c.headers['cache-control'], 'public, max-age=60');
-  ok(/^sub=\d+\/45; d1=\d+\/45; refused=0$/.test(c.headers['x-bts-budget']));
-  const d = await call('/v1/report/' + TOKEN, { db, cache, modules: { report } });
-  eq(d.json.verdict, 'v');
-  eq(step, 3, 'served from the cache');
-});
-
-test('report errors keep their code; a crash is a plain 503', async () => {
-  const nf = await call('/v1/report/' + TOKEN, { db: fakeD1(), modules: { report: async () => ({ ok: false, code: 'not-pons', message: 'Not a Pons coin.' }) } });
-  eq(nf.status, 404);
-  eq(nf.json, { ok: false, code: 'not-pons', message: 'Not a Pons coin.' });
-  const boom = await call('/v1/report/' + TOKEN, { db: fakeD1(), modules: { report: async () => { throw new Error('x'); } } });
-  eq(boom.status, 503);
-  eq(boom.json.ok, false);
-});
-
-test('links: "unavailable" is answered as is, not cached and not queued', async () => {
-  const db = fakeD1();
-  const links = async () => ({ ok: true, status: 'unavailable', funders: [], links: [], ignored: [], caveat: 'c' });
-  const r = await call('/v1/report/' + TOKEN + '/links', { db, modules: { links } });
+test('report: the launch basics from the index (no chain read) with a note that the browser builds the report', async () => {
+  const fx = await loadFixture();
+  const index = fixtureIndex(fx.index.rows, { lastBlock: 1, lastRun: 1 });
+  const r = await call('/v1/report/' + TOKEN.toUpperCase().replace('0X', '0x'), { db: fakeD1(), index, fetch: async () => { throw new Error('no chain'); } });
   eq(r.status, 200);
-  eq(r.json.status, 'unavailable');
-  eq(r.headers['cache-control'], 'no-store');
-  eq(db.cache.size, 0);
-  eq(db.jobs.size, 0);
-  const done = await call('/v1/report/' + TOKEN + '/links', { db, modules: { links: async () => ({ ok: true, status: 'done', funders: [], links: [], ignored: [], caveat: 'c' }) } });
-  eq(done.status, 200);
-  ok(db.cache.has('links:' + TOKEN));
+  eq(r.json.status, 'basics');
+  eq(r.json.clientSide, true);
+  eq(r.json.inIndex, true);
+  eq(r.json.token.address, TOKEN);
+  eq(r.json.token.symbol, 'OBSYN');
+  eq(r.json.token.pons.launchTime, '2026-11-17T14:14:00Z');
+  eq(r.json.launch.token, TOKEN);
+  ok(/^0x[0-9a-f]{64}$/.test(r.json.launch.tx) && Number.isFinite(r.json.launch.time));
+  ok(/browser/.test(r.json.note) && /npx blamethestock-mcp/.test(r.json.note));
+  eq(r.headers['cache-control'], 'public, max-age=60');
+  eq(r.budget.used, 0);
+  const none = await call('/v1/report/0x00000000000000000000000000000000000000aa', { db: fakeD1(), index });
+  eq([none.status, none.json.status, none.json.inIndex, none.json.launch], [200, 'basics', false, null]);
+});
+
+test('links: a note that wallet links are checked in the browser', async () => {
+  const r = await call('/v1/report/' + TOKEN + '/links', { db: fakeD1() });
+  eq(r.status, 200);
+  eq(r.json.status, 'client');
+  ok(/browser/.test(r.json.note));
+  eq(r.json.links, []);
 });
 
 // =========================================================================================================
@@ -383,94 +365,61 @@ test('/mcp goes to the MCP handler with the shared routes as its api', async () 
   let got = null;
   const mcp = async (request, env, ctx, opts) => { got = opts; return { fake: 'response' }; };
   const db = fakeD1();
-  const r = await call('/mcp', { method: 'POST', mcp, db, modules: { report: async () => ({ ok: true, status: 'done', verdict: 'x' }) } });
+  const r = await call('/mcp', { method: 'POST', mcp, db });
   eq(r.raw, { fake: 'response' });
   ok(got && typeof got.api.copies === 'function' && typeof got.api.report === 'function' && typeof got.api.links === 'function');
   ok(got.budget && got.settings && typeof got.now === 'number');
 });
 
-test('MCP api.report shares the route cache', async () => {
-  let got = null, n = 0;
+test('MCP api.report and api.copies answer from the index', async () => {
+  const fx = await loadFixture();
+  const head = fx.index.head;
+  const index = fixtureIndex(fx.index.rows, { lastBlock: head.number, lastRun: head.time });
+  let got = null;
   const mcp = async (request, env, ctx, opts) => { got = opts; return {}; };
-  const db = fakeD1();
-  const modules = { report: async () => { n++; return { ok: true, status: 'done', verdict: 'x' }; } };
-  await call('/mcp', { method: 'POST', mcp, db, modules });
+  await call('/mcp', { method: 'POST', mcp, db: fakeD1(), index, now: head.time * 1000 });
   const a = await got.api.report(TOKEN);
-  eq(a.verdict, 'x');
-  const b = await call('/v1/report/' + TOKEN, { db, modules });
-  eq(b.json.verdict, 'x');
-  eq(n, 1, 'the route read the answer the MCP call cached');
+  eq([a.status, a.token.symbol], ['basics', 'OBSYN']);
+  const c = await got.api.copies('OBSYN');
+  eq([c.facts, c.matches.length], ['client', 4]);
+  eq((await got.api.links(TOKEN)).status, 'client');
 });
 
 // =========================================================================================================
 suite('worker › cron');
 
-test('scheduled: indexer runs inside its own share of the budget, then jobs move on', async () => {
+test('scheduled: the indexer runs in its own 40-subrequest share, dRPC in 100-block pieces, then old rows are purged', async () => {
   const db = fakeD1();
-  db.jobs.set('report:a', { key: 'report:a', kind: 'report', token: '0xa', created: NOW / 1000 - 10, touched: 1, attempts: 0, progress: 0 });
-  db.jobs.set('links:b', { key: 'links:b', kind: 'links', token: '0xb', created: NOW / 1000 - 10, touched: 2, attempts: 0, progress: 0 });
-  db.jobs.set('report:old', { key: 'report:old', kind: 'report', token: '0xc', created: NOW / 1000 - 4000, touched: 0, attempts: 0, progress: 0 });
-  let indexerEnv = null;
-  const runIndexer = async (env) => { indexerEnv = env; await env.DB.prepare(W.SQL_META).all(); return { ok: true, from: 1, to: 2, written: 0 }; };
-  const modules = {
-    report: async ({ token, budget }) => { ok(budget.remaining() > 0); return { ok: true, status: 'building', progress: 0.5 }; },
-    links: async () => ({ ok: true, status: 'done', funders: [], links: [] }),
-  };
+  let indexerEnv = null, opts = null;
+  const runIndexer = async (env, o) => { indexerEnv = env; opts = o; await env.DB.prepare(W.SQL_META).all(); return { ok: true, from: 1, to: 2, written: 0 }; };
   const budget = createBudget({ limit: 45, d1Limit: 45 });
-  const out = await W.withBudget(budget, () => W.runScheduled({ DB: db }, { now: NOW, budget, runIndexer, modules, log: () => {} }));
+  const out = await W.withBudget(budget, () => W.runScheduled({ DB: db }, { now: NOW, budget, runIndexer, log: () => {} }));
   ok(indexerEnv && indexerEnv.DB.__budgeted, 'the indexer gets a counted DB');
   eq(out.indexer.written, 0);
-  eq(out.jobs.map((j) => j.result), ['dropped', 'building', 'done']);
-  eq(db.jobs.get('report:a').attempts, 1);
-  eq(db.jobs.get('report:a').progress, 0.5);
-  ok(!db.jobs.has('links:b') && db.cache.has('links:0xb'), 'finished job cached and removed');
-  ok(!db.jobs.has('report:old'), 'too old: dropped');
+  eq(out.indexerBudget.limit, 40);
+  eq([opts.logSpan, opts.maxLogRequests, opts.maxRows, opts.maxBlocks], [100, 22, 15, 6600]);
   ok(out.purged);
   ok(out.budget.d1Used <= 45);
 });
 
-test('scheduled: an indexer failure does not stop the jobs; no DB is reported, not thrown', async () => {
+test('scheduled: an indexer failure is reported, not thrown; no DB is reported, not thrown', async () => {
   const db = fakeD1();
-  db.jobs.set('links:b', { key: 'links:b', kind: 'links', token: '0xb', created: NOW / 1000, touched: 2, attempts: 0, progress: 0 });
   const lines = [];
-  const out = await W.runScheduled({ DB: db }, { now: NOW, runIndexer: async () => { throw new Error('rpc down'); }, modules: { report: null, links: async () => ({ ok: true, status: 'done' }) }, log: (t) => lines.push(t) });
+  const out = await W.runScheduled({ DB: db }, { now: NOW, runIndexer: async () => { throw new Error('rpc down'); }, log: (t) => lines.push(t) });
   eq(out.indexer.ok, false);
-  eq(out.jobs[0].result, 'done');
+  ok(out.purged);
   ok(lines.some((l) => /rpc down/.test(l)));
   const none = await W.runScheduled({}, { now: NOW, log: () => {} });
   eq(none.indexer.ok, false);
 });
 
-test('scheduled: stops starting jobs when the budget is nearly spent', async () => {
-  const db = fakeD1();
-  for (let i = 0; i < 3; i++) db.jobs.set('report:' + i, { key: 'report:' + i, kind: 'report', token: '0x' + i, created: NOW / 1000, touched: i, attempts: 0, progress: 0 });
+test('the Worker asks the official node last (it answers 429 to Cloudflare)', async () => {
   const budget = createBudget({ limit: 45 });
-  let calls = 0;
-  const modules = { links: null, report: async ({ budget: b }) => { calls++; b.take(b.hardRoom() - 5); return { ok: true, status: 'building', progress: 0.1 }; } };
-  await W.runScheduled({ DB: db }, { now: NOW, budget, runIndexer: async () => ({ ok: true }), modules, log: () => {} });
-  eq(calls, 1);
-  ok(budget.used <= 45);
-});
-
-// =========================================================================================================
-test('modules with their own job table: the cron calls their advancers; requests don\'t queue in api_jobs', async () => {
-  const db = fakeD1();
-  const got = {};
-  const mk = (kind) => ({
-    [kind === 'report' ? 'launchReport' : 'walletLinks']: async () => ({ ok: true, status: 'building', progress: 0.2 }),
-    [kind === 'report' ? 'advanceReportJobs' : 'advanceLinkJobs']: async (args) => { got[kind] = args; args.budget.fetch('x'); return { advanced: ['0xa'], done: [] }; },
-  });
-  const modules = { report: mk('report'), links: mk('links') };
-  const r = await call('/v1/report/' + TOKEN, { db, modules });
-  eq(r.status, 202);
-  eq(db.jobs.size, 0, 'report.js keeps its own queue');
-  const budget = createBudget({ limit: 45, fetch: async () => ({ ok: true }) });
-  const out = await W.runScheduled({ DB: db }, { now: NOW, budget, runIndexer: async () => ({ ok: true }), modules, log: () => {} });
-  ok(got.report && got.links, 'both advancers ran');
-  ok(got.report.env.DB.__budgeted && typeof got.report.settings === 'object' && got.report.now === NOW);
-  ok(got.report.budget.limit < 45 && got.report.budget.limit >= 10, 'the report gets a share, not everything: ' + got.report.budget.limit);
-  eq(budget.used, 2, 'their fetches count on the cron budget');
-  eq(out.jobs.map((j) => j.result), ['advanced 1, done 0', 'advanced 1, done 0']);
+  let order = null;
+  await W.withBudget(budget, async () => { order = byHealth(['official', 'publicnode', 'drpc']); });
+  eq(order, ['publicnode', 'drpc', 'official']);
+  _setTransport({});
+  eq(byHealth(['official', 'publicnode', 'drpc']), ['official', 'publicnode', 'drpc'], 'the site keeps its own order');
 });
 
 // =========================================================================================================
