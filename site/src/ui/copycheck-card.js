@@ -1,9 +1,10 @@
 // Blame the Stock: the copy check card ("Is this the real one?"). Shows a CopyCheckResult from our API
 // (api/src/copies.js) in #copies, under the blame card. Loaded by app.js only when it is needed.
 //
-//   fetchCopies(query, settings, { fetch }) -> CopyCheckResult | { ok:false, code, message } | null (API unreachable)
+//   fetchCopies(query, settings, { fetch }) -> CopyCheckResult | { ok:false, code, message } | building | null (unreachable)
+//   loadCopies(query, settings, { fetch, sleep, live, onProgress, maxWaitMs })  polls while the API says 'building'
 //   copyView(result, settings, { timeZone }) -> plain object with every string and link the card shows (no DOM)
-//   renderCopiesLoading(el, settings) / renderCopies(el, resultOrErrorOrNull, settings, { timeZone })
+//   renderCopiesLoading(el, settings, progress) / renderCopies(el, resultOrErrorOrNull, settings, { timeZone })
 //
 // Everything from the API is treated as data: text goes in with textContent only, and every link is rebuilt here
 // from an address or transaction hash that has been checked, so a bad answer can't point a link anywhere else.
@@ -69,13 +70,25 @@ export function words(settings = SETTINGS) {
 }
 
 // ---- the API ---------------------------------------------------------------------------------------------
-// GET {apiBase}/v1/copies?q=… . Returns the result, an error the API explained, or null when the API couldn't be
-// reached or answered something we don't understand (the card then shows one grey line).
-export async function fetchCopies(query, settings = SETTINGS, { fetch: f = globalThis.fetch, timeoutMs = TIMEOUT_MS } = {}) {
+// The API address from settings: https only. The one exception is local development: a page served from this
+// machine (localhost / 127.0.0.1) may talk to a Worker on this machine over http (app.js sets it from ?dev-api=).
+const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])$/;
+export function apiBaseOf(settings = SETTINGS) {
   const t = (settings && settings.trust) || {};
   const base = String(t.apiBase || '').replace(/\/+$/, '');
+  if (/^https:\/\/[^/?#@]+$/.test(base)) return base;
+  const m = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d{2,5}$/.exec(base);
+  const page = typeof location !== 'undefined' && location ? String(location.hostname || '') : '';
+  return m && LOOPBACK.test(page) ? base : null;
+}
+
+// GET {apiBase}/v1/copies?q=… . Returns the result, an error the API explained, { ok:true, status:'building' } while
+// the API is still reading the coins (see loadCopies), or null when the API couldn't be reached or answered
+// something we don't understand (the card then shows one grey line).
+export async function fetchCopies(query, settings = SETTINGS, { fetch: f = globalThis.fetch, timeoutMs = TIMEOUT_MS } = {}) {
+  const base = apiBaseOf(settings);
   const q = String(query == null ? '' : query).trim().slice(0, 100);
-  if (!/^https:\/\/[^/?#]+$/.test(base) || !q || typeof f !== 'function') return null;
+  if (!base || !q || typeof f !== 'function') return null;
   const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
   const timer = ctrl && typeof setTimeout === 'function' ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
@@ -94,14 +107,38 @@ export async function fetchCopies(query, settings = SETTINGS, { fetch: f = globa
   }
 }
 
-// Only the two shapes of the contract get through.
+// Only the shapes of the contract get through.
 export function checkAnswer(body) {
   if (!body || typeof body !== 'object') return null;
+  if (body.ok === true && body.status === 'building') {
+    const p = Number(body.progress), w = Number(body.retryAfterSeconds);
+    return { ok: true, status: 'building', progress: Number.isFinite(p) ? Math.max(0, Math.min(1, p)) : 0,
+      retryAfterSeconds: Number.isFinite(w) ? Math.max(1.5, Math.min(10, w)) : 2 };
+  }
   if (body.ok === true && Array.isArray(body.matches) && body.query && typeof body.query === 'object') return body;
   if (body.ok === false && typeof body.code === 'string' && /^[a-z-]{2,40}$/.test(body.code)) {
     return { ok: false, code: body.code, message: text(body.message) };
   }
   return null;
+}
+
+// Asks again while the API says 'building' (a name with several coins is read over a few calls).
+// Returns the final answer, null when unreachable or still building after maxWaitMs, or undefined when live()
+// turned false (a newer lookup took over).
+export async function loadCopies(query, settings = SETTINGS, opts = {}) {
+  const { sleep = (ms) => new Promise((r) => setTimeout(r, ms)), live = () => true, onProgress = null, maxWaitMs = 120000 } = opts;
+  let waited = 0;
+  for (;;) {
+    const res = await fetchCopies(query, settings, opts);
+    if (!live()) return undefined;
+    if (!res || res.status !== 'building') return res;
+    if (onProgress) onProgress(res.progress);
+    const ms = res.retryAfterSeconds * 1000;
+    if (waited + ms > maxWaitMs) return null;
+    await sleep(ms);
+    waited += ms;
+    if (!live()) return undefined;
+  }
 }
 
 // ---- times -----------------------------------------------------------------------------------------------
@@ -338,10 +375,11 @@ function card(state, ...kids) {
   return el;
 }
 
-export function renderCopiesLoading(el, settings = SETTINGS) {
+export function renderCopiesLoading(el, settings = SETTINGS, progress = null) {
   const W = words(settings);
   if (!el) return null;
-  const c = card('loading', head({ title: W.title }), h('p', { class: 'bts-progress cc-progress', text: W.checking }));
+  const pct = typeof progress === 'number' && progress > 0 ? ' ' + Math.round(Math.min(1, progress) * 100) + '%' : '';
+  const c = card('loading', head({ title: W.title }), h('p', { class: 'bts-progress cc-progress', text: W.checking + pct }));
   c.setAttribute('aria-busy', 'true');
   swap(el, c);
   return c;

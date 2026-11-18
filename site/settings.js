@@ -124,6 +124,52 @@ export const SETTINGS = {
         "explorer-unavailable": "The explorer didn't answer. Try again in a moment.",
       },
     },
+
+    // Launch report: what a coin's dev and first buyers did, under the copy check (addresses only, not tickers).
+    // Wallet links load after it, on their own. {curly brackets} are filled in automatically.
+    report: {
+      enabled: true,        // false = no launch report card
+      wording: {
+        title: "Launch report",
+        checking: "Building the launch report…",
+        building: "Building the launch report… {pct}",
+        unavailable: "Launch report unavailable right now.",
+        stillBuilding: "The launch report is still being built.",
+        tryAgain: "Try again",
+        devTitle: "Dev",
+        sniperTitle: "First buyers",
+        activityTitle: "Activity",
+        linksTitle: "Wallet links",
+        devWallet: "Dev wallet",
+        launchBuy: "Launch buy",
+        soldFact: "Sold",
+        soldNothing: "nothing",
+        feesClaimed: "Fees claimed",
+        feesUnclaimed: "Fees not yet claimed",
+        bridgedOut: "Bridged out",
+        afterGraduation: "after graduation",
+        soldBeforeGraduation: "Sold before graduation",
+        soldOnCurve: "Sold on the curve",
+        soldAfterGraduation: "Sold {gap} after graduation",
+        holding: "Still holding",
+        notGraduated: "Not graduated yet",
+        buysPerHour: "Buys per hour",
+        activityNote: "Curve buys only, for the first 24 hours or until graduation.",
+        linksChecking: "Checking wallet links…",
+        linksUnavailable: "Wallet links unavailable right now.",
+        linksNone: "No funding links found between the dev and the {count} first buyers we checked.",
+        weak: "Can be chance",
+        strong: "Same funder",
+        howTitle: "How we got this",
+        errors: {
+          "bad-address": "That isn't a coin address.",
+          "not-found": "We couldn't find a coin at this address on Robinhood Chain.",
+          "not-pons": "This coin wasn't launched on Pons, so there's no launch report for it.",
+          "rpc-failed": "Robinhood Chain didn't answer.",
+          "unavailable": "Launch report unavailable right now.",
+        },
+      },
+    },
   },
 
   // ---- Stock-Paired Board (shows when stockBoard above is true) ------

@@ -1,0 +1,21 @@
+{
+  "name": "bts-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Blame the Stock API Worker (api.blamethestock.com): launch index, copy check, launch report, MCP. Read-only.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787",
+    "test-scheduled": "wrangler dev --local --port 8787 --test-scheduled",
+    "db:local": "wrangler d1 execute bts --local --file=schema.sql && wrangler d1 execute bts --local --file=schema-reports.sql"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "agents": "0.33.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "wrangler": "4.164.0"
+  }
+}

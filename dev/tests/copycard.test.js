@@ -2,8 +2,8 @@
 // (fetchCopies with a fake fetch), the ticker test in app.js, and the settings/page/safety-rule wiring.
 // The OBSYN results are the real copy check replayed offline (dev/tests/fixtures/obsyn).
 import { suite, test, eq, ok } from './harness.js';
-import { copyView, fetchCopies, checkAnswer, errorText, relative, when, words, shortAddr } from '../../site/src/ui/copycheck-card.js';
-import { tickerOf } from '../../site/src/app.js';
+import { copyView, fetchCopies, checkAnswer, errorText, relative, when, words, shortAddr, loadCopies, apiBaseOf } from '../../site/src/ui/copycheck-card.js';
+import { tickerOf, devApi } from '../../site/src/app.js';
 import { SETTINGS } from '../../site/settings.js';
 import { TRUST_DEFAULTS, trustSettings, CAVEATS } from '../../site/src/trust/rules.js';
 import { loadFixture, runScenario, OBSYN } from './fixtures/obsyn/replay.js';
@@ -35,7 +35,7 @@ test('ticker OBSYN: earliest first, the abandoned one folded into "1 quiet copy"
   const v = copyView(await obsyn('ticker', 'OBSYN'), SETTINGS, NY);
   eq(v.title, 'Is this the real one?');
   eq(v.query, '$OBSYN');
-  eq(v.verdict, '4 Pons coins use this name. 2 look like quick copies.');
+  eq(v.verdict, '4 Pons coins use this name. 1 looks like a quick copy. 1 had its dev sell within minutes.');
   eq(v.rows.map((r) => r.address), [OBSYN.early, OBSYN.copy, OBSYN.real]);
   eq(v.quiet.map((r) => r.short), ['0x17e2…5121']);
   eq(v.quietLabel, '1 quiet copy');
@@ -52,7 +52,7 @@ test('ticker OBSYN: earliest first, the abandoned one folded into "1 quiet copy"
 test('pasted copycat: highlighted, the others timed against it, its facts and flags in plain words', async () => {
   const v = copyView(await obsyn('copy', OBSYN.copy), SETTINGS, NY);
   eq(v.query, '0x7a2a…475e');
-  eq(v.verdict, '3 other coins use this name. 1 looks like a quick copy. The coin you pasted has warning flags.');
+  eq(v.verdict, '3 other coins use this name. 1 had its dev sell within minutes. The coin you pasted has warning flags.');
   const mine = v.rows.find((r) => r.isQuery);
   eq(mine.address, OBSYN.copy);
   eq(mine.tags, ['Yours']);
@@ -226,4 +226,34 @@ test('safety rules: the API is allowed to be fetched, and nothing else changed (
   eq(part('script-src'), "'self'");
   eq(part('default-src'), "'self'");
   ok(!part('img-src').includes('blamethestock'));
+});
+
+test('loadCopies polls while the API says building (a name with several coins), then gives the answer', async () => {
+  const good = result([match(1)]);
+  const answers = [[202, { ok: true, status: 'building', progress: 0.5, retryAfterSeconds: 2 }], [200, good]];
+  const f = async () => { const [status, body] = answers.shift(); return { status, ok: status < 300, json: async () => body }; };
+  const waits = [], seen = [];
+  eq(await loadCopies('OBSYN', SETTINGS, { fetch: f, sleep: async (ms) => { waits.push(ms); }, onProgress: (p) => seen.push(p) }), good);
+  eq([waits, seen], [[2000], [0.5]]);
+  eq(checkAnswer({ ok: true, status: 'building', progress: 7, retryAfterSeconds: 999 }), { ok: true, status: 'building', progress: 1, retryAfterSeconds: 10 });
+  // still building after maxWaitMs: unavailable (null); a newer lookup took over: undefined
+  const always = async () => ({ status: 202, ok: true, json: async () => ({ ok: true, status: 'building', progress: 0.1, retryAfterSeconds: 2 }) });
+  eq(await loadCopies('OBSYN', SETTINGS, { fetch: always, sleep: async () => {}, maxWaitMs: 5000 }), null);
+  eq(await loadCopies('OBSYN', SETTINGS, { fetch: always, sleep: async () => {}, live: () => false }), undefined);
+});
+
+test('local development: ?dev-api= is honoured only on a page served from this machine, and only for a local Worker', () => {
+  const S = (b) => ({ trust: { apiBase: b } });
+  const run = (hostname, search) => { const s = S('https://api.blamethestock.com'); devApi({ hostname, search }, s); return s.trust.apiBase; };
+  eq(run('localhost', '?dev-api=http://localhost:8787'), 'http://localhost:8787');
+  eq(run('127.0.0.1', '?ca=0x1&dev-api=http://127.0.0.1:8787/'), 'http://127.0.0.1:8787');
+  eq(run('blamethestock.com', '?dev-api=http://localhost:8787'), 'https://api.blamethestock.com', 'real site: ignored');
+  eq(run('localhost', '?dev-api=http://evil.example:8787'), 'https://api.blamethestock.com', 'not a local Worker');
+  eq(run('localhost', '?dev-api=https://evil.example'), 'https://api.blamethestock.com');
+  eq(run('localhost', '?dev-api=http://localhost:8787/path'), 'https://api.blamethestock.com');
+  eq(devApi(null, S('x')), null);
+  // the cards' own check: https, or http to this machine only when the page is on this machine (never in jsc)
+  eq(apiBaseOf(S('https://api.blamethestock.com/')), 'https://api.blamethestock.com');
+  eq(apiBaseOf(S('https://user@evil.example')), null);
+  eq(apiBaseOf(S('http://localhost:8787')), typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? 'http://localhost:8787' : null);
 });

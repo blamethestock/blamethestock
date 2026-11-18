@@ -181,9 +181,18 @@ test('verdict wording', () => {
   const q = { kind: 'ticker' };
   const quick = mk({ n: 1, flags: [{ code: 'dev-dumped-fast' }] });
   eq(R.buildVerdict({ query: q, matches: [], official: null }), 'No Pons coin uses this name.');
-  eq(R.buildVerdict({ query: q, matches: [quick, mk({ n: 2 }), mk({ n: 3 })], official: null }), '3 Pons coins use this name. 1 looks like a quick copy.');
+  eq(R.buildVerdict({ query: q, matches: [quick, mk({ n: 2 }), mk({ n: 3 })], official: null }), '3 Pons coins use this name. 1 had its dev sell within minutes.');
   const qa = { kind: 'address', address: ad(2), isPons: true };
-  eq(R.buildVerdict({ query: qa, matches: [quick, mk({ n: 2, isQuery: true })], official: null }), '1 other coin uses this name. 1 looks like a quick copy.');
+  eq(R.buildVerdict({ query: qa, matches: [quick, mk({ n: 2, isQuery: true })], official: null }), '1 other coin uses this name. 1 had its dev sell within minutes.');
+  // "quick copy" = launched just before a same-name coin, or uses the official coin's name; never only "dev sold fast"
+  const copy = mk({ n: 4, flags: [{ code: 'launched-just-before' }, { code: 'dev-dumped-fast' }] });
+  const left = mk({ n: 5, flags: [{ code: 'fees-and-left' }] });
+  eq(R.buildVerdict({ query: q, matches: [quick, copy, left, mk({ n: 6 })], official: null }),
+    '4 Pons coins use this name. 1 looks like a quick copy. 1 had its dev sell within minutes. 1 had its dev take fees and bridge out within the hour.');
+  const quick2 = mk({ n: 7, flags: [{ code: 'dev-dumped-fast' }] });
+  eq(R.buildVerdict({ query: q, matches: [quick, quick2], official: null }), '2 Pons coins use this name. 2 had their devs sell within minutes.');
+  eq(R.buildVerdict({ query: qa, matches: [mk({ n: 2, isQuery: true, flags: [{ code: 'dev-dumped-fast' }] }), mk({ n: 8 })], official: null }),
+    '1 other coin uses this name. The coin you pasted has warning flags.');
   eq(R.buildVerdict({ query: { kind: 'address', address: ad(5), isPons: false }, matches: [], official: null }), 'This coin wasn\'t launched on Pons. No Pons coin uses this name.');
   const official = { symbol: 'BLAME', address: BLAME };
   eq(R.buildVerdict({ query: { kind: 'address', address: BLAME, isPons: true }, matches: [mk({ n: 2, isOfficial: true, isQuery: true })], official }),
@@ -294,7 +303,8 @@ test('ticker OBSYN: every Pons OBSYN, earliest first, with the verdict', async (
   eq(r.matches.map((m) => m.address), [OBSYN.early, OBSYN.copy, OBSYN.real, '0x17e222c5cdc77be5c20159f192255eec72525121']);
   ok(r.matches.every((m) => m.match === 'exact' && !m.isQuery && !m.isOfficial && m.isPons));
   eq(r.official, null);
-  eq(r.verdict, '4 Pons coins use this name. 2 look like quick copies.');
+  // the copycat is the quick copy; 0x0188 (the earliest) only had its dev sell fast, so it is not called a copy
+  eq(r.verdict, '4 Pons coins use this name. 1 looks like a quick copy. 1 had its dev sell within minutes.');
   eq(r.indexComplete, true);
   eq(r.indexedFrom, '2026-11-17T09:08:22Z');
   ok(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(r.asOf), r.asOf);
@@ -330,7 +340,7 @@ test('copycat 0x7a2A: launched 11 min 45 s before, dev dumped in 71 s, fees and 
   eq(c.flags.find((f) => f.code === 'launched-just-before').text, 'Launched 11 min 45 s before a coin with the same name that later graduated (0x5d99…4351).');
   eq(c.flags.find((f) => f.code === 'dev-dumped-fast').text, 'Dev sold 100% of their launch buy 1 min 11 s after launch.');
   eq(c.flags.find((f) => f.code === 'fees-and-left').text, 'Dev claimed 0.0258 ETH in fees and bridged 0.0473 ETH out, all within 3 min 12 s of launch.');
-  eq(r.verdict, '3 other coins use this name. 1 looks like a quick copy. The coin you pasted has warning flags.');
+  eq(r.verdict, '3 other coins use this name. 1 had its dev sell within minutes. The coin you pasted has warning flags.');
 });
 
 test('real 0x5D99: dev bought 1.142%, never sold, fees claimed, bridged to Base, graduated, no warnings', async () => {
@@ -356,7 +366,7 @@ test('real 0x5D99: dev bought 1.142%, never sold, fees claimed, bridged to Base,
   eq(m.holders, { count: 287, source: 'blockscout' });
   eq(warnCodes(m), [], 'no warning flags');
   eq(codes(m), ['same-snipers']);
-  eq(r.verdict, '3 other coins use this name. 2 look like quick copies.');
+  eq(r.verdict, '3 other coins use this name. 1 looks like a quick copy. 1 had its dev sell within minutes.');
 });
 
 test('snipers: 9 wallets took 20.5% in 3 s; routed buys name the buyer, not the router', async () => {
@@ -494,7 +504,7 @@ test('official $BLAME: official set, the official row marked, every other same-n
 test('official $BLAME by address, and a same-name coin by address', async () => {
   const rows = [blameRow(0), blameRow(1)];
   const a = (await route(BLAME, rows)).r;
-  eq(a.verdict, 'This is the official $BLAME. 1 other coin uses this name.');
+  eq(a.verdict, 'This is the official $BLAME. 1 other coin uses this name. 1 looks like a quick copy.', 'it uses the official name');
   ok(a.matches.find((m) => m.address === BLAME).isQuery);
   const b = (await route(ad(1).toUpperCase().replace('0X', '0x'), rows)).r;
   ok(b.verdict.startsWith('This is not the official $BLAME. The official one is 0x0000…1a3e.'), b.verdict);

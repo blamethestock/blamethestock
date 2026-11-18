@@ -1,35 +1,52 @@
-# Blame the Stock API Worker. PREPARED ONLY: nothing here has been deployed.
-# Deploy steps (after Node.js is installed and `npx wrangler login` is done by the owner):
-#   1. npx wrangler d1 create bts            -> paste the printed database_id below
-#   2. npx wrangler d1 execute bts --remote --file=api/schema.sql
-#   3. npx wrangler deploy --config api/wrangler.toml
-# The custom domain needs blamethestock.com to be an active zone in the same Cloudflare account.
+# Blame the Stock API Worker (bts-api). PREPARED ONLY: nothing here has been deployed.
+#
+# Local (no Cloudflare account needed):
+#   sh dev/tools/local_e2e.sh                      creates the local D1, loads the index, starts wrangler dev on :8787
+#   cd api && npm run dev                          wrangler dev --local on :8787 (uses the same local D1)
+#   cd api && npm run test-scheduled               same, plus http://localhost:8787/__scheduled runs the cron once
+#
+# Deploy steps (later, after the owner has run `npx wrangler login`):
+#   1. npx wrangler d1 create bts                  -> paste the printed database_id below (replace REPLACE_AT_DEPLOY)
+#   2. npx wrangler d1 execute bts --remote --file=schema.sql
+#      npx wrangler d1 execute bts --remote --file=schema-reports.sql
+#   3. uncomment `routes` below (needs blamethestock.com as an active zone in the same account)
+#   4. npx wrangler deploy                         (run inside api/)
+#
+# Built for the Workers FREE plan (10 ms CPU, 50 subrequests and 50 D1 queries per request; Cache API calls share the
+# subrequest quota): see src/budget.js.
 
 name = "bts-api"
-main = "src/worker.js"            # written by the API builder; it calls runIndexer() from src/indexer.js on cron
+main = "src/entry.js"           # loads the MCP SDK and the report modules at startup, then runs src/worker.js
 compatibility_date = "2026-11-01"
-workers_dev = false               # only reachable on the custom domain
+# nodejs_compat: the MCP handler (agents/mcp) uses AsyncLocalStorage; the Worker uses it to count each
+# request's subrequests on that request's own budget.
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false               # only reachable on the custom domain once deployed
 
-routes = [
-  { pattern = "api.blamethestock.com", custom_domain = true }
-]
+# Custom domain, turned on at deploy time (step 3 above):
+# routes = [
+#   { pattern = "api.blamethestock.com", custom_domain = true }
+# ]
 
 [[d1_databases]]
 binding = "DB"
 database_name = "bts"
-database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+database_id = "REPLACE_AT_DEPLOY"
 
-# The minute indexer: reads new TokenLaunched events and name()/symbol() into D1.
+# Every minute: the launch indexer (new TokenLaunched events, name()/symbol()), then queued report/link jobs.
 [triggers]
 crons = ["* * * * *"]
 
 [vars]
-# The official $BLAME address, set on launch day (must match site/settings.js token.contractAddress).
+# The official $BLAME address, set on launch day (must match site/settings.js token.contractAddress and
+# trust.official). Empty = no official coin yet.
 OFFICIAL = ""
+# Browser origins allowed by CORS (comma-separated). Anything else still gets JSON, without the CORS header.
+SITE_ORIGINS = "https://blamethestock.com,https://www.blamethestock.com,http://localhost:8765"
 
-# Logs: Workers Logs on, but request logs keep no visitor IPs or user agents.
-# invocation_logs = false stops the automatic per-request log line (it carries request metadata);
-# the Worker's own console.log lines (indexer progress) are kept and never include visitor data.
+# Logs: the Worker's own lines only (indexer progress, errors). invocation_logs = false turns off the automatic
+# per-request log line, which carries request metadata. No line the Worker writes ever holds an IP address or a
+# user agent.
 [observability]
 enabled = true
 head_sampling_rate = 1
@@ -37,3 +54,7 @@ head_sampling_rate = 1
 [observability.logs]
 enabled = true
 invocation_logs = false
+
+# Traces would record every request and subrequest with its metadata: kept off.
+[observability.traces]
+enabled = false

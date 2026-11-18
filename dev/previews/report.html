@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launch report preview · Blame the Stock (dev)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<link rel="stylesheet" href="../../site/src/ui/card.css">
+<link rel="stylesheet" href="../../site/src/ui/trust.css">
+<link rel="stylesheet" href="../../site/src/ui/report.css">
+<style>
+  :root {
+    --bg: #000; --fg: #fff; --grey: #8b8b8b; --line: #262626;
+    --pair: #2433FF; --coin: #FF4F1F; --radius: 20px;
+    --font: "Archivo", "Arial Narrow", Arial, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #000; color: #fff; font-family: var(--font); font-size: 16px; }
+  .bar {
+    position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+    padding: 12px 16px; background: rgba(0,0,0,.92); border-bottom: 1px solid #262626; font-size: 13px;
+  }
+  .bar h1 { margin: 0 12px 0 0; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+  .bar label { color: #8b8b8b; display: inline-flex; gap: 6px; align-items: center; }
+  .bar select { font: inherit; color: #fff; background: #111; border: 1px solid #333; border-radius: 999px; padding: 6px 12px; }
+  main { padding: 8px 16px 120px; }
+  .row { padding: 28px 0; border-bottom: 1px solid #1a1a1a; }
+  .row-head { margin-bottom: 14px; }
+  .row-head h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+  .row-head p { margin: 4px 0 0; color: #8b8b8b; font-size: 13px; }
+  .frames { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .frame { flex: none; max-width: 100%; }
+  .frame-desk { width: 920px; }
+  .frame-phone { width: 375px; padding: 0 16px; outline: 1px dashed #222; }
+  .frame-cap { font-size: 11px; color: #555; margin: 0 0 6px; letter-spacing: .08em; text-transform: uppercase; }
+  .frame .mount { width: 100%; }
+  body[data-layout="desktop"] .frame-phone { display: none; }
+  body[data-layout="phone"] .frame-desk { display: none; }
+  body[data-layout="phone"] main { padding-left: 0; padding-right: 0; }
+  body[data-layout="phone"] .row-head { padding: 0 16px; }
+  body[data-layout="phone"] .frame-phone, body[data-layout="phone"] .frame-desk { width: 100%; max-width: 375px; outline: 0; }
+  .warn { margin: 16px; padding: 12px 16px; border: 1px solid #FF4F1F; border-radius: 12px; }
+</style>
+</head>
+<body data-layout="both">
+  <div class="bar">
+    <h1>Launch report preview</h1>
+    <label>Layout
+      <select id="layout">
+        <option value="both">Desktop + phone</option>
+        <option value="desktop">Desktop only</option>
+        <option value="phone">Phone only</option>
+      </select>
+    </label>
+    <label>Show
+      <select id="filter">
+        <option value="all">Everything</option>
+        <option value="obsyn">OBSYN (recorded)</option>
+        <option value="states">Building, links states</option>
+        <option value="sample">Made-up variations</option>
+        <option value="errors">Errors</option>
+      </select>
+    </label>
+  </div>
+  <main id="list"></main>
+
+<script type="module">
+// The OBSYN cards are the real launch report and wallet links (api/src/report.js, api/src/links.js) replayed from
+// answers recorded once from Robinhood Chain and Blockscout (dev/tests/fixtures/obsyn/report-*.json).
+// The "made-up" rows change a copy of the recorded report in memory to show states OBSYN doesn't have.
+import { SETTINGS } from '../../site/settings.js';
+import { renderReport, renderReportLoading, renderLinks, showReport } from '../../site/src/ui/report-card.js';
+import { loadReportFixture, runReportScenario, REPORT_SCENARIOS, OBSYN } from '../tests/fixtures/obsyn/report-replay.js';
+import { buildVerdict } from '../../site/src/trust/report-rules.js';
+
+const list = document.getElementById('list');
+const qs = new URLSearchParams(location.search);
+for (const [id, key] of [['layout', 'layout'], ['filter', 'show']]) {
+  const sel = document.getElementById(id);
+  if (qs.get(key)) sel.value = qs.get(key);
+}
+const apply = () => {
+  document.body.dataset.layout = document.getElementById('layout').value;
+  const f = document.getElementById('filter').value;
+  for (const r of list.querySelectorAll('.row')) r.hidden = f !== 'all' && r.dataset.group !== f;
+};
+document.getElementById('layout').addEventListener('change', apply);
+document.getElementById('filter').addEventListener('change', apply);
+
+function row(group, title, note, draw) {
+  const sec = document.createElement('section');
+  sec.className = 'row';
+  sec.dataset.group = group;
+  const head = document.createElement('div');
+  head.className = 'row-head';
+  const h2 = document.createElement('h2'); h2.textContent = title;
+  const p = document.createElement('p'); p.textContent = note;
+  head.append(h2, p);
+  const frames = document.createElement('div');
+  frames.className = 'frames';
+  for (const [cls, cap] of [['frame-desk', 'Desktop (920px card)'], ['frame-phone', 'Phone (375px screen)']]) {
+    const f = document.createElement('div');
+    f.className = 'frame ' + cls;
+    const c = document.createElement('p'); c.className = 'frame-cap'; c.textContent = cap;
+    const m = document.createElement('div'); m.className = 'mount';
+    f.append(c, m);
+    frames.append(f);
+    draw(m);
+  }
+  sec.append(head, frames);
+  list.append(sec);
+}
+
+// ---- recorded OBSYN ---------------------------------------------------------------------------------------------
+let fx = null;
+try { fx = await loadReportFixture(); } catch (e) { fx = null; }
+const rec = {};
+if (fx && Object.keys(fx.rpc).length) {
+  for (const sc of REPORT_SCENARIOS) rec[sc.name] = await runReportScenario(sc, fx);
+} else {
+  list.insertAdjacentHTML('beforebegin', '<p class="warn">Could not load the recorded OBSYN answers.</p>');
+}
+const clone = (x) => JSON.parse(JSON.stringify(x));
+const full = (r, links) => (m) => { const c = renderReport(m, r, SETTINGS); renderLinks(c, links, r, SETTINGS, { onRetry: () => {} }); };
+
+// A fake API for the live-flow rows: answers in order, a short wait between polls.
+function fakeApi(answers, { delay = 700 } = {}) {
+  return async () => {
+    await new Promise((r) => setTimeout(r, delay));
+    const a = answers.length > 1 ? answers.shift() : answers[0];
+    return { status: a && a.status === 'building' ? 202 : 200, json: async () => a };
+  };
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 900)));
+
+const real = rec['real OBSYN'], copy = rec['copycat OBSYN'];
+if (real) {
+  row('obsyn', 'Real OBSYN 0x5d99…4351, with wallet links', 'Recorded (head block 117,273,262). Heavily sniped; dev claimed fees, bridged to Base and sold nothing.', full(real.again, real.links));
+}
+if (copy) {
+  row('obsyn', 'OBSYN copycat 0x7a2a…475e, with wallet links', 'Recorded. Dev sold the whole buy 71 s after launch; never graduated.', full(copy.again, copy.links));
+}
+
+// ---- states -----------------------------------------------------------------------------------------------------
+row('states', 'Building (first look at a coin)', 'The API builds the report in small steps; the card polls and shows progress.', (m) => renderReportLoading(m, SETTINGS, 0.35, { query: '0x5d99…4351' }));
+if (real) {
+  row('states', 'Report drawn, wallet links still being checked', 'The report never waits for the links. Verdict has no links sentence yet.', (m) => {
+    const c = renderReport(m, real.report, SETTINGS); renderLinks(c, 'checking', real.report, SETTINGS);
+  });
+  row('states', 'Wallet links unavailable (explorer busy) + Try again', 'Click Try again: it checks again and shows the links.', (m) => {
+    const c = renderReport(m, real.report, SETTINGS);
+    const again = () => { renderLinks(c, 'checking', real.report, SETTINGS); setTimeout(() => renderLinks(c, real.links, real.report, SETTINGS), 900); };
+    renderLinks(c, { ok: true, status: 'unavailable' }, real.report, SETTINGS, { onRetry: again });
+  });
+  row('states', 'Live flow: building, then the report, then the links', 'Fake API: two "building" answers (25%, 70%), the report, one "building" for the links, then the links. Reload to replay.', (m) => {
+    const f = fakeApi([{ ok: true, status: 'building', progress: 0.25, retryAfterSeconds: 2 }, { ok: true, status: 'building', progress: 0.7, retryAfterSeconds: 2 },
+      real.report, { ok: true, status: 'building', progress: 0.5 }, real.links]);
+    showReport(m, OBSYN.real, SETTINGS, { fetch: f, sleep });
+  });
+}
+
+// ---- made-up variations ------------------------------------------------------------------------------------------
+if (real) {
+  const v = clone(real.again);
+  v.token.symbol = 'BLAME'; v.token.name = 'Blame the Stock'; v.token.isOfficial = true;
+  const ws = v.snipers.wallets;
+  Object.assign(ws[0], { status: 'holding', soldPct: 0, sellTx: undefined, sellTime: undefined });
+  Object.assign(ws[1], { status: 'partly-sold', soldPct: 40 });
+  Object.assign(ws[2], { status: 'holding', soldPct: 0, movedPct: 30, sellTx: undefined });
+  v.missing = ['bridges'];
+  v.refreshing = true;
+  v.dev.moves.unshift({ type: 'sell', tokens: 1000000, pct: 0.1, eth: 0.004, time: '2026-11-17T14:20:00Z', tx: v.dev.moves[0].tx, afterGraduation: false });
+  v.dev.movesNotShown = 12;
+  v.dev.soldPct = 0.1;
+  v.verdict = buildVerdict(v, null);   // the card adds the links sentence once the links are in
+  const links = clone(real.links);
+  links.links.unshift({ wallets: [links.dev, ws[0].address], funder: ws[3].address, strength: 'strong', involvesDev: true,
+    reason: 'Both got their first ETH from the same wallet, 4 h apart.', proof: links.links[0].proof.slice(0, 2) });
+  row('sample', 'MADE-UP: official badge, holders, a dev sell, a dev funding link, parts missing', 'A copy of the recorded report changed in memory, to show states OBSYN doesn\'t have.', (m) => {
+    const c = renderReport(m, v, SETTINGS); renderLinks(c, links, v, SETTINGS);
+  });
+  const quiet = clone(real.again);
+  quiet.snipers.wallets = []; quiet.snipers.totalPct = 0; quiet.snipers.clusters = [];
+  quiet.activity.hours = []; quiet.graduation = null; quiet.dev.moves = []; quiet.dev.fees = { claimedEth: 0, unclaimedEth: 0, claims: [] }; quiet.dev.bridges = [];
+  quiet.verdict = 'No first buyers besides the dev in the first 5 s. Dev sold nothing.';
+  row('sample', 'MADE-UP: a quiet coin (no first buyers, no moves)', 'Empty blocks say so in plain words.', (m) => {
+    const c = renderReport(m, quiet, SETTINGS); renderLinks(c, { ...real.links, links: [], ignored: [] }, quiet, SETTINGS);
+  });
+}
+
+// ---- errors -------------------------------------------------------------------------------------------------------
+row('errors', 'API unreachable', 'One grey line with Try again; the blame card and copy check are never held up.', (m) => renderReport(m, null, SETTINGS, { onRetry: () => renderReportLoading(m, SETTINGS, null) }));
+row('errors', 'Still building after 3 minutes', 'Polling stops; Try again starts over.', (m) => renderReport(m, { ok: false, code: 'still-building' }, SETTINGS, { onRetry: () => {} }));
+for (const code of ['not-pons', 'not-found', 'rpc-failed', 'unavailable']) {
+  row('errors', 'Error: ' + code, 'ErrorResult from the API (no message: the card\'s own words).', (m) => renderReport(m, { ok: false, code, message: code === 'unavailable' ? 'The launch report is unavailable right now. Try again in a minute.' : '' }, SETTINGS, { onRetry: () => {} }));
+}
+apply();
+document.body.dataset.ready = '1';
+</script>
+</body>
+</html>

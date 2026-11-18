@@ -18,6 +18,10 @@ import './ui.test.js';          // page behaviour: deep links, focus, board row 
 import './indexer.test.js';     // launch indexer
 import './copycheck.test.js';   // fake-copy logic (OBSYN fixtures)
 import './copycard.test.js';    // copy-check card
+import './report.test.js';      // launch report + wallet links
+import './reportcard.test.js';  // launch-report card
+import './worker.test.js';      // API Worker (router, CORS, cache, limits)
+import './mcp.test.js';         // MCP tools
 // =================== END OF TEST FILES ================
 
 const inBrowser = typeof document !== 'undefined';   // note: browsers also have a print() (it prints the page)

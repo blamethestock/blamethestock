@@ -94,6 +94,7 @@ export async function lookup(raw, win, { scroll = true } = {}) {
     busy(false);
     setUrl(null, w);
     copies(null);
+    report(null);
     const err = toError({ ok: false, code: 'bad-address' });
     if (hint(err.message)) clearCard(out);
     else renderError(out, err, { onAnother: focusInput });
@@ -104,6 +105,7 @@ export async function lookup(raw, win, { scroll = true } = {}) {
   shown = { address, window: w };
   setUrl(address, w);
   copies(address);                               // its own card under this one; never holds this one up
+  report(address);                               // the launch report: its own card under that, also on its own
   busy(true);
   const view = { coin: address, window: w };
   renderLoading(out, FIRST_STEP, view);
@@ -205,8 +207,8 @@ function copies(query, { reveal: show = null } = {}) {
     if (!live()) return;
     card.renderCopiesLoading(out, SETTINGS);
     if (show) show(out);
-    const res = await card.fetchCopies(query, SETTINGS);
-    if (!live()) return;
+    const res = await card.loadCopies(query, SETTINGS, { live, onProgress: (p) => { if (live()) card.renderCopiesLoading(out, SETTINGS, p); } });
+    if (res === undefined || !live()) return;
     if (!res || res.ok !== true) copyFor = null;   // the next lookup of the same coin asks again
     card.renderCopies(out, res, SETTINGS);
     if (show) show(out);                         // a ticker search: bring the finished card into view
@@ -221,6 +223,39 @@ function copies(query, { reveal: show = null } = {}) {
   });
 }
 
+// ---- Launch report (settings.trust.report) -------------------------------------------------------
+// Its own card in #report, under the copy check, from our API: polls while the API is still building it (with
+// progress), then loads the wallet links separately, after the report is on screen. Never holds up or breaks the
+// blame card or the copy check: if the API can't be reached it says so in one grey line, with "Try again".
+let reportSeq = 0;
+let reportFor = null;                           // the coin on screen (or on its way), so tab switches don't re-ask
+const reportOn = () => !!(copiesOn() && $('report')
+  && !(SETTINGS.trust.report && SETTINGS.trust.report.enabled === false));
+
+function report(address) {
+  const out = $('report');
+  if (!out || !reportOn()) return;
+  if (!address) { reportSeq++; reportFor = null; out.textContent = ''; return; }
+  if (address === reportFor) return;
+  const my = ++reportSeq;
+  reportFor = address;
+  const live = () => my === reportSeq;
+  import('./ui/report-card.js').then(async (card) => {
+    if (!live()) return;
+    const res = await card.showReport(out, address, SETTINGS, { live });
+    if (live() && (!res || res.ok !== true)) reportFor = null;   // the next lookup of the same coin asks again
+  }).catch(() => {
+    if (!live()) return;
+    reportFor = null;
+    const p = document.createElement('p');
+    p.className = 'cc-line rc-line';
+    const w = SETTINGS.trust.report && SETTINGS.trust.report.wording;
+    p.textContent = (w && w.unavailable) || 'Launch report unavailable right now.';
+    out.textContent = '';
+    out.append(p);
+  });
+}
+
 // A ticker in the box (or ?q=): the copy check only, no blame card.
 function tickerLookup(ticker, { scroll = true } = {}) {
   ++seq;                                        // a blame lookup still running may no longer draw
@@ -229,6 +264,7 @@ function tickerLookup(ticker, { scroll = true } = {}) {
   hint('');
   const out = $('result');
   if (out) clearCard(out);
+  report(null);                                 // a ticker has no launch report (it can match several coins)
   try {
     const u = new URL(location.href);
     u.searchParams.delete('ca');
@@ -239,6 +275,20 @@ function tickerLookup(ticker, { scroll = true } = {}) {
   const show = scroll === true ? reveal
     : scroll === 'if-untouched' ? (o) => { if (untouched()) reveal(o); } : null;   // a shared link: not if they got busy
   copies(ticker, { reveal: show });
+}
+
+// Local development only: ?dev-api=http://localhost:8787 points the copy check and the launch report at a Worker
+// running on this machine. Honoured only when the page itself is served from this machine (localhost, 127.0.0.1),
+// and only for an http://localhost:PORT or http://127.0.0.1:PORT address; ignored everywhere else.
+export function devApi(loc = typeof location !== 'undefined' ? location : null, settings = SETTINGS) {
+  try {
+    if (!loc || !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(String(loc.hostname || ''))) return null;
+    const m = /[?&]dev-api=([^&#]*)/.exec(String(loc.search || ''));
+    const base = m ? decodeURIComponent(m[1].replace(/\+/g, ' ')).trim().replace(/\/+$/, '') : '';
+    if (!/^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(base) || !settings.trust) return null;
+    settings.trust.apiBase = base;
+    return base;
+  } catch (e) { return null; }
 }
 
 function submitFromInput({ blur = true } = {}) {
@@ -256,6 +306,7 @@ function submitFromInput({ blur = true } = {}) {
 }
 
 export function boot() {
+  devApi();
   // Paste box (delegated, so it works even if the hero is re-drawn)
   document.addEventListener('submit', (e) => {
     if (!e.target || e.target.id !== 'paste-form') return;

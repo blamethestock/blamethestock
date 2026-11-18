@@ -46,8 +46,11 @@ export function d1Index(db) {
       const res = await db.prepare('SELECT key, value FROM meta').all();
       const m = {};
       for (const r of (res && res.results) || []) m[r.key] = Number(r.value);
-      const oldest = await db.prepare('SELECT block, time FROM launches ORDER BY block ASC LIMIT 1').first();
       const ok = (v) => (Number.isFinite(v) ? v : null);
+      // the first launch of the unbroken indexed range (a stray older row doesn't count), same as /v1/health
+      const oldest = Number.isFinite(m.oldest_block)
+        ? await db.prepare('SELECT block, time FROM launches WHERE block >= ?1 ORDER BY block ASC LIMIT 1').bind(m.oldest_block).first()
+        : await db.prepare('SELECT block, time FROM launches ORDER BY block ASC LIMIT 1').first();
       return { lastBlock: ok(m.last_block), oldestBlock: ok(m.oldest_block), lastRun: ok(m.last_run), oldestTime: oldest ? ok(Number(oldest.time)) : null };
     },
   };
@@ -127,7 +130,7 @@ async function run({ input, isAddr, index, state, ctx, t, now, gather }) {
     queryRow = await index.findByToken(addr);
     if (!queryRow) {
       try { queryRow = await launchRowFromChain(addr, ctx); } catch (e) { queryRow = null; }
-      if (queryRow) notes.push('This coin is newer than our launch index, so its launch was read straight from the chain.');
+      if (queryRow) notes.push('This coin isn\'t in our launch index yet, so its launch was read straight from the chain.');
     }
     let name = queryRow ? queryRow.name : null, symbol = queryRow ? queryRow.symbol : null;
     if (name == null || symbol == null) {

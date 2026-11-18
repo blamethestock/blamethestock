@@ -38,6 +38,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     continue
                 if name.lower() == 'content-security-policy':
                     value = '; '.join(p for p in value.split('; ') if p.strip() != 'upgrade-insecure-requests')
+                    # Local only: the page may also reach a local API Worker (wrangler dev, ?dev-api=…).
+                    value = value.replace('connect-src ', 'connect-src http://localhost:8787 http://127.0.0.1:8787 ', 1)
                 self.send_header(name, value)
         super().end_headers()
 

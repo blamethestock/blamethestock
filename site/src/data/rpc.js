@@ -80,9 +80,14 @@ export function classifyRpcError(err, endpoint = '') {
 
 // ---- concurrency limit per endpoint --------------------------------------------------------
 const lanes = {};
+// The API Worker gives every request its own lane table: a Worker may not wake one request's waiting promise from
+// another request (the runtime cancels the waiter and the request hangs). The page keeps the one shared table.
+let laneScope = null;
+export function _setLaneScope(fn) { laneScope = typeof fn === 'function' ? fn : null; }
 function lane(name, max) {
-  if (!lanes[name]) lanes[name] = { busy: 0, max, waiting: [] };
-  return lanes[name];
+  const table = (laneScope && laneScope()) || lanes;
+  if (!table[name]) table[name] = { busy: 0, max, waiting: [] };
+  return table[name];
 }
 async function inLane(name, max, fn) {
   const l = lane(name, max);

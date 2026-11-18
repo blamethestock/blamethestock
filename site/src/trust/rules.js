@@ -280,8 +280,15 @@ export function applyFlags(matches, { official = null, settings } = {}) {
 }
 
 // ---- verdict, notes, caveats -----------------------------------------------------------------------------
-const QUICK_COPY = new Set(['launched-just-before', 'dev-dumped-fast', 'fees-and-left']);
+// "Quick copy" is only said about a coin that copies another one by its timing or its name: launched just before
+// a same-name coin, or uses the official coin's name. A coin whose dev sold fast (or took fees and bridged out)
+// is described as that, separately, so the earliest coin of a name is never called a copy.
+const QUICK_COPY = new Set(['launched-just-before', 'name-of-official']);
+const DEV_FAST = 'dev-dumped-fast';
+const FEES_LEFT = 'fees-and-left';
+const PASTED_WARN = new Set(['launched-just-before', 'dev-dumped-fast', 'fees-and-left']);
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+const hasFlag = (m, codes) => (m.flags || []).some((f) => (typeof codes === 'string' ? f.code === codes : codes.has(f.code)));
 
 // totals (optional): { exact, near } = every index row found, including rows not read in full (the matches list
 // is cut to maxFacts). Without it the matches themselves are counted. "Use this name" counts exact matches only;
@@ -292,7 +299,11 @@ export function buildVerdict({ query, matches, official, totals = null }) {
   const all = totals && Number.isFinite(totals.exact) && Number.isFinite(totals.near) ? totals : kinds(matches);
   const self = kinds(matches.filter((m) => m.isQuery || m.isOfficial));
   const oth = { exact: Math.max(0, all.exact - self.exact), near: Math.max(0, all.near - self.near) };
-  const quick = others.filter((m) => m.flags.some((f) => QUICK_COPY.has(f.code))).length;
+  const quickRows = others.filter((m) => hasFlag(m, QUICK_COPY));
+  const quick = quickRows.length;
+  const rest = others.filter((m) => !quickRows.includes(m));
+  const devFast = rest.filter((m) => hasFlag(m, DEV_FAST)).length;
+  const feesLeft = rest.filter((m) => !hasFlag(m, DEV_FAST) && hasFlag(m, FEES_LEFT)).length;
   const queryRow = matches.find((m) => m.isQuery);
   const sym = official ? '$' + official.symbol : '';
   let lead;
@@ -314,7 +325,10 @@ export function buildVerdict({ query, matches, official, totals = null }) {
   if (n.near) count += ' ' + (n.exact ? n.near + ' more' : String(n.near)) + (n.near === 1 ? ' has' : ' have') + ' a similar name.';
   let tail = '';
   if (quick) tail = ' ' + (quick === 1 ? '1 looks like a quick copy.' : quick + ' look like quick copies.');
-  if (queryRow && queryRow.flags.some((f) => QUICK_COPY.has(f.code)) && !official) {
+  if (devFast) tail += ' ' + (devFast === 1 ? '1 had its dev sell within minutes.' : devFast + ' had their devs sell within minutes.');
+  if (feesLeft) tail += ' ' + (feesLeft === 1 ? '1 had its dev take fees and bridge out within the hour.'
+    : feesLeft + ' had their devs take fees and bridge out within the hour.');
+  if (queryRow && hasFlag(queryRow, PASTED_WARN) && !official) {
     tail += ' The coin you pasted has warning flags.';
   }
   return [lead, count + tail].filter(Boolean).join(' ');

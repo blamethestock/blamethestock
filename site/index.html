@@ -39,6 +39,7 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="src/ui/card.css">
   <link rel="stylesheet" href="src/ui/trust.css">
+  <link rel="stylesheet" href="src/ui/report.css">
   <!-- The Stock-Paired Board's stylesheet (src/features/board.css) is added by src/ui/page.js only when the board is on. -->
 
   <!-- Tiny early switch (kept in its own file so the safety rules can forbid code written into the page). -->
@@ -82,9 +83,9 @@
 
       <div class="hero-tool" id="hero-tool">
         <form class="paste" id="paste-form" action="./" method="get" role="search" autocomplete="off">
-          <label class="visually-hidden" for="ca-input">Coin address</label>
+          <label class="visually-hidden" for="ca-input">Coin address or ticker</label>
           <input id="ca-input" name="ca" type="text" inputmode="text"
-                 placeholder="Paste a Robinhood Chain coin address (0x…)" aria-describedby="paste-hint"
+                 placeholder="Paste a coin address (0x…) or ticker" aria-describedby="paste-hint"
                  autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="120">
           <button class="btn btn-white" id="paste-submit" type="submit">Blame</button>
         </form>
@@ -103,6 +104,10 @@
 
     <!-- 3b. Copy check, "Is this the real one?" (filled by src/app.js + src/ui/copycheck-card.js from our API) -->
     <section id="copies" aria-live="polite" aria-label="Is this the real one?"></section>
+
+    <!-- 3c. Launch report: dev, first buyers, activity, then wallet links (filled by src/app.js + src/ui/report-card.js
+         from our API; addresses only, never for a ticker) -->
+    <section id="report" aria-live="polite" aria-label="Launch report"></section>
 
     <!-- 4. How it works: the three steps, and one example card that fills in as they go.
          Wide screens: the panel stays put while you scroll; the steps light up one by one and the card adds

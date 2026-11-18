@@ -16,6 +16,10 @@ How it works:
 
 Usage:  /usr/bin/python3 -I dev/tools/record_obsyn.py            (writes dev/tests/fixtures/obsyn/*.json)
         /usr/bin/python3 -I dev/tools/record_obsyn.py --fresh    (forgets the old recording first)
+        /usr/bin/python3 -I dev/tools/record_obsyn.py --report   (launch report + wallet links fixtures only:
+            report-rpc.json / report-explorer.json, replaying dev/tests/fixtures/obsyn/report-replay.js; the head
+            block is the one pinned in index.json / rpc.json, so both fixtures describe the same moment)
+        add --fresh to --report to forget the old report recording first.
 Re-recording changes live numbers (unclaimed fees, holders, liquidity): update the expected values in the test.
 """
 import json
@@ -31,6 +35,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 OUT = os.path.join(ROOT, 'dev', 'tests', 'fixtures', 'obsyn')
 REPLAY_JS = os.path.join(OUT, 'replay.js')
+REPORT_REPLAY_JS = os.path.join(OUT, 'report-replay.js')
 JSC = '/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc'
 RPC_URL = 'https://rpc.mainnet.chain.robinhood.com'
 EXPLORER = 'https://robinhoodchain.blockscout.com'
@@ -166,17 +171,39 @@ def trim_explorer(path, got):
     if path.startswith('/api/v2/tokens/'):
         keep = ('address_hash', 'name', 'symbol', 'decimals', 'holders_count', 'total_supply', 'type')
         return {'status': 200, 'json': {k: j.get(k) for k in keep}}
-    if '/transactions' in path and isinstance(j.get('items'), list):
+    if 'transactions' in path and isinstance(j.get('items'), list):        # /transactions and /internal-transactions
         items = []
         for it in j['items']:
-            items.append({
+            item = {
                 'hash': it.get('hash'), 'timestamp': it.get('timestamp'), 'status': it.get('status'),
                 'value': it.get('value'), 'block_number': it.get('block_number'), 'method': it.get('method'),
-                'from': {'hash': (it.get('from') or {}).get('hash')},
+                'from': t_addr(it.get('from')),
                 'to': {'hash': (it.get('to') or {}).get('hash')} if it.get('to') else None,
-            })
+            }
+            for k in ('position', 'index', 'transaction_hash', 'success', 'error', 'type'):   # internal transactions
+                if k in it:
+                    item[k] = it.get(k)
+            items.append(item)
         return {'status': 200, 'json': {'items': items, 'next_page_params': j.get('next_page_params')}}
     return got
+
+
+def t_addr(a):
+    """An explorer address object, cut to what the code reads (hash, contract flag and any public label)."""
+    a = a or {}
+    out = {'hash': a.get('hash')}
+    if a.get('is_contract'):
+        out['is_contract'] = True
+    if a.get('name'):
+        out['name'] = a.get('name')
+    tags = [{'display_name': t.get('display_name'), 'label': t.get('label')} for t in (a.get('public_tags') or []) if isinstance(t, dict)]
+    if tags:
+        out['public_tags'] = tags
+    meta = a.get('metadata') or {}
+    mtags = [{'name': t.get('name')} for t in (meta.get('tags') or []) if isinstance(t, dict) and t.get('name')]
+    if mtags:
+        out['metadata'] = {'tags': mtags}
+    return out
 
 
 # ---- files ------------------------------------------------------------------------------------------------------
@@ -279,15 +306,37 @@ main().catch((e) => print('CRASH ' + e + '\n' + (e && e.stack)));
 '''
 
 
-def run_driver(work):
+REPORT_DRIVER = r'''
+import { loadReportFixture, runReportScenario, REPORT_SCENARIOS } from '%s';
+async function main() {
+  const fx = await loadReportFixture();
+  const misses = { rpc: new Map(), explorer: new Set() };
+  const log = [];
+  for (const sc of REPORT_SCENARIOS) {
+    try {
+      const r = await runReportScenario(sc, fx, { misses, log });
+      print('RESULT ' + sc.name + ': report ' + (r.report && r.report.status) + ', links ' + (r.links && r.links.status));
+    } catch (e) { print('ERROR ' + sc.name + ': ' + e + '\n' + (e && e.stack)); }
+  }
+  print('USED ' + JSON.stringify([...new Set(log)]));
+  print('MISSES ' + JSON.stringify({ rpc: [...misses.rpc.values()], explorer: [...misses.explorer] }));
+}
+main().catch((e) => print('CRASH ' + e + '\n' + (e && e.stack)));
+'''
+
+
+def run_driver(work, report=False):
     path = os.path.join(work, 'driver.js')
     with open(path, 'w', encoding='utf-8') as f:
-        f.write(DRIVER % REPLAY_JS.replace('\\', '/'))
+        if report:
+            f.write(REPORT_DRIVER % REPORT_REPLAY_JS.replace('\\', '/'))
+        else:
+            f.write(DRIVER % REPLAY_JS.replace('\\', '/'))
     out = subprocess.run([JSC, '-m', path], capture_output=True, text=True, timeout=600)
     text = out.stdout + out.stderr
     line = next((l for l in reversed(text.splitlines()) if l.startswith('MISSES ')), None)
     for l in text.splitlines():
-        if l.startswith(('ERROR', 'CRASH')):
+        if l.startswith(('ERROR', 'CRASH', 'RESULT')):
             print(l)
     used = next((l for l in reversed(text.splitlines()) if l.startswith('USED ')), None)
     if line is None or used is None:
@@ -297,9 +346,50 @@ def run_driver(work):
     return miss
 
 
+def record_report(fresh):
+    """Launch report + wallet links fixtures (report-rpc.json, report-explorer.json) at index.json's head block."""
+    base = load('rpc.json', {})
+    if not load('index.json', None) or HEAD_KEY not in base:
+        raise SystemExit('record the copy-check fixture first (no index.json / pinned head yet)')
+    rpc = {} if fresh else load('report-rpc.json', {})
+    explorer = {} if fresh else load('report-explorer.json', {})
+    rpc[HEAD_KEY] = base[HEAD_KEY]                    # the same pinned head as the copy check
+    try:
+        with tempfile.TemporaryDirectory() as work:
+            for round_ in range(1, 61):
+                miss = run_driver(work, report=True)
+                print('round %d: %d rpc + %d explorer requests to record' % (round_, len(miss['rpc']), len(miss['explorer'])))
+                if not miss['rpc'] and not miss['explorer']:
+                    used = set(miss['used'])
+                    rpc = {k: v for k, v in rpc.items() if k in used or k == HEAD_KEY}
+                    explorer = {k: v for k, v in explorer.items() if 'GET ' + k in used}
+                    save('report-rpc.json', rpc)
+                    save('report-explorer.json', explorer)
+                    break
+                todo = miss['rpc']
+                for k in range(0, len(todo), 20):
+                    part = todo[k:k + 20]
+                    for m, res in zip(part, rpc_many([(m['method'], m['params']) for m in part])):
+                        rpc[m['key']] = trim_rpc(m['method'], m['params'], res)
+                for path in miss['explorer']:
+                    explorer[path] = trim_explorer(path, explorer_get(path))
+                    time.sleep(0.5)                   # Blockscout allows ~150 requests per 5 minutes
+                save('report-rpc.json', rpc)
+                save('report-explorer.json', explorer)
+            else:
+                raise SystemExit('still missing requests after 60 rounds')
+    except Unavailable as e:
+        save('report-rpc.json', rpc)
+        save('report-explorer.json', explorer)
+        raise SystemExit('Blockscout unavailable (%s). Saved what was recorded; run again later.' % e)
+    print('done: %d rpc answers, %d explorer answers (report fixtures) in %s' % (len(rpc), len(explorer), OUT))
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     fresh = '--fresh' in sys.argv
+    if '--report' in sys.argv:
+        return record_report(fresh)
     rpc = {} if fresh else load('rpc.json', {})
     explorer = {} if fresh else load('explorer.json', {})
     index = None if fresh else load('index.json', None)

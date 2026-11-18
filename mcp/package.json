@@ -1,0 +1,39 @@
+{
+  "name": "blamethestock-mcp",
+  "version": "0.1.0",
+  "description": "Read-only MCP server for Robinhood Chain coin research: blame split, copycat check, launch report. Not financial advice.",
+  "mcpName": "com.blamethestock/blamethestock",
+  "type": "module",
+  "bin": {
+    "blamethestock-mcp": "src/index.js"
+  },
+  "main": "src/index.js",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "zod": "4.6.7"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "robinhood-chain",
+    "pons",
+    "memecoin",
+    "on-chain",
+    "research",
+    "read-only"
+  ],
+  "homepage": "https://blamethestock.com",
+  "author": "Blame the Stock",
+  "license": "MIT"
+}

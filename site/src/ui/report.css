@@ -1,0 +1,196 @@
+/* Blame the Stock: the launch report card in #report, under the copy check.
+   Builds on the result card (card.css: .bts-card) and the copy check card (trust.css: .cc-head, .cc-verdict, .cc-facts,
+   .cc-flags, .cc-foot, .cc-how, .cc-tool, .cc-link). Accents only where they mean something: in the first buyers'
+   supply bar (vermilion = sold or moved, blue = still held), a vermilion dot for a dev sell and a sold wallet.
+   Activity bars are grey. */
+
+/* ---- the mount under the copy check ---------------------------------------------------------------------- */
+#report {
+  position: relative;
+  z-index: 2;
+  width: min(calc(100% - 2 * var(--gutter, 16px)), var(--max, 1200px));
+  margin: 16px auto 0;
+  scroll-margin-top: calc(var(--menu-top, 12px) + var(--menu-h, 54px) + 16px);
+}
+#report:empty { display: none; }
+#result:empty + #copies:empty + #report { margin-top: 0; }
+
+/* The "How it works" panel keeps its usual gap after the cards (styles.css only knows #result). */
+@media (min-width: 900px) and (min-height: 561px) {
+  .motion #report:not(:empty) + .how { padding-top: clamp(32px, 4vw, 64px); }
+  .motion #copies:not(:empty) + #report:empty + .how { padding-top: clamp(32px, 4vw, 64px); }
+  .motion #result:not(:empty) + #copies:empty + #report:empty + .how { padding-top: clamp(32px, 4vw, 64px); }
+}
+
+/* ---- one grey line (+ Try again) ------------------------------------------------------------------------- */
+.rc-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+
+/* ---- building --------------------------------------------------------------------------------------------- */
+.rc-progress {
+  height: 4px; margin-top: 14px; border-radius: 999px; overflow: hidden;
+  background: var(--bts-line);
+}
+.rc-progress-fill {
+  display: block; height: 100%; border-radius: inherit; background: var(--bts-fg);
+  transition: width .6s var(--bts-ease);
+}
+
+/* ---- the card ----------------------------------------------------------------------------------------------- */
+.rc-official { justify-content: space-between; }
+.rc-verdict { max-width: 34ch; }
+.rc-card .cc-verdict { font-size: clamp(24px, 4.2cqi, 38px); }
+
+.rc-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin-top: clamp(22px, 4cqi, 34px); }
+.rc-block { min-width: 0; padding: clamp(18px, 3.4cqi, 26px) 0; border-top: 1px solid var(--bts-line); }
+.rc-block-title {
+  margin: 0 0 14px;
+  font-size: 12px; font-weight: 600; line-height: 1.2; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--bts-grey);
+}
+.rc-note { margin: 12px 0 0; font-size: 13px; line-height: 1.5; color: var(--bts-grey); overflow-wrap: anywhere; }
+.rc-lead { margin: 0; font-size: clamp(16px, 2.4cqi, 19px); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+
+/* ---- Dev ----------------------------------------------------------------------------------------------------- */
+.rc-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 0; padding-top: 0; border-top: 0; }
+.rc-steps { position: relative; margin: 18px 0 0; padding: 0; list-style: none; }
+.rc-step {
+  position: relative;
+  display: grid; grid-template-columns: 6.6em 14px minmax(0, 1fr); gap: 0 12px; align-items: start;
+  padding: 7px 0;
+}
+/* the line joining the dots */
+.rc-step::before {
+  content: ""; position: absolute; left: calc(6.6em + 12px + 6.5px); top: 0; bottom: 0; width: 1px; background: var(--bts-line);
+}
+.rc-step:first-child::before { top: 15px; }
+.rc-step:last-child::before { bottom: auto; height: 15px; }
+.rc-step:only-child::before { display: none; }
+.rc-step-rel {
+  padding-top: 1px; text-align: right;
+  font-size: 12px; line-height: 1.5; color: var(--bts-grey); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.rc-step-node {
+  position: relative; z-index: 1; justify-self: center;
+  width: 9px; height: 9px; margin-top: 6px; border-radius: 50%;
+  background: var(--bts-edge); box-shadow: 0 0 0 4px var(--bts-bg);
+}
+.rc-step.is-launch .rc-step-node { background: var(--bts-fg); }
+.rc-step.is-warn .rc-step-node { background: var(--bts-coin); }
+.rc-step.is-neutral .rc-step-node { background: var(--bts-bg); border: 1px solid var(--bts-fg); }
+.rc-step-body { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.rc-step-text { font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
+.rc-step.is-neutral .rc-step-text { color: var(--bts-grey); }
+.rc-step-link { color: inherit; }
+.rc-step-when { flex-basis: 100%; font-size: 12px; line-height: 1.4; color: var(--bts-grey); }
+.rc-step-rel-in { display: none; }
+.rc-after { padding: 2px 7px; font-size: 10px; }
+.rc-more { margin: 10px 0 0 calc(6.6em + 26px + 12px); font-size: 13px; color: var(--bts-grey); }
+
+/* ---- First buyers ---------------------------------------------------------------------------------------------- */
+.rc-supply {
+  display: flex; gap: 2px; height: clamp(12px, 2cqi, 16px); margin-top: 16px;
+  border-radius: 999px; overflow: hidden; background: #161616;
+}
+.rc-seg { flex: none; min-width: 3px; height: 100%; }
+.rc-seg-gone { background: var(--bts-coin); }
+.rc-seg-held { background: var(--bts-pair); }
+.rc-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 10px 0 0; padding: 0; list-style: none;
+  font-size: 13px; line-height: 1.3; color: var(--bts-grey);
+}
+.rc-key { display: inline-flex; align-items: center; gap: 0 8px; }
+.rc-key b { color: var(--bts-fg); font-weight: 700; font-variant-numeric: tabular-nums; }
+.rc-key-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #161616; box-shadow: inset 0 0 0 1px var(--bts-edge); }
+.rc-key.is-gone .rc-key-dot { background: var(--bts-coin); box-shadow: none; }
+.rc-key.is-held .rc-key-dot { background: var(--bts-pair); box-shadow: none; }
+.rc-key.is-buys .rc-key-dot { background: #4a4a4a; box-shadow: none; border-radius: 2px; }
+.rc-key.is-new .rc-key-dot { background: #a6a6a6; box-shadow: none; border-radius: 2px; }
+
+.rc-wallets { margin: 16px 0 0; padding: 0; list-style: none; }
+.rc-wallet {
+  display: grid; grid-template-columns: 12px minmax(0, 1.2fr) 4.6em minmax(0, 2fr); gap: 2px 12px; align-items: baseline;
+  padding: 10px 0; border-top: 1px solid var(--bts-line);
+  font-size: 14px; line-height: 1.4;
+}
+.rc-wallet:first-child { border-top: 0; }
+.rc-wallet-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bts-pair); transform: translateY(-1px); }
+.rc-wallet.is-sold-on-curve .rc-wallet-dot,
+.rc-wallet.is-sold-after-graduation .rc-wallet-dot { background: var(--bts-coin); }
+.rc-wallet.is-partly-sold .rc-wallet-dot { background: linear-gradient(90deg, var(--bts-coin) 50%, var(--bts-pair) 50%); }
+.rc-wallet-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; min-width: 0; }
+.rc-wallet-addr { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.rc-wallet-at { font-size: 12px; color: var(--bts-grey); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rc-wallet-pct { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rc-wallet-status { min-width: 0; color: #c4c4c4; overflow-wrap: anywhere; }
+.rc-wallet.is-holding .rc-wallet-status { color: var(--bts-fg); }
+
+.rc-fold > summary {
+  display: flex; align-items: baseline; gap: 4px 12px; padding: 10px 0 4px;
+  list-style: none; cursor: pointer; font-size: 14px; font-weight: 600;
+}
+.rc-fold > summary::-webkit-details-marker { display: none; }
+.rc-fold > summary::before { content: "+"; flex: none; width: 1em; font-weight: 600; color: var(--bts-grey); }
+.rc-fold[open] > summary::before { content: "−"; }
+.rc-fold .rc-wallets { margin-top: 4px; }
+
+/* ---- Activity ------------------------------------------------------------------------------------------------- */
+.rc-grad { margin: 0; font-size: clamp(16px, 2.4cqi, 19px); font-weight: 600; line-height: 1.35; }
+.rc-grad:not(.is-done) { color: var(--bts-grey); font-weight: 500; }
+.rc-hours-wrap { margin-top: 16px; }
+.rc-hours-label {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px;
+  margin: 0 0 8px; font-size: 13px; color: var(--bts-grey);
+}
+.rc-hours-total { color: var(--bts-fg); font-variant-numeric: tabular-nums; }
+.rc-hours {
+  display: flex; align-items: flex-end; gap: 3px; height: 72px; margin: 0; padding: 0; list-style: none;
+  border-bottom: 1px solid var(--bts-line);
+}
+.rc-hour { position: relative; flex: 1 1 0; min-width: 2px; height: 100%; display: flex; align-items: flex-end; }
+.rc-hour-bar {
+  position: relative; display: block; width: 100%; min-height: 1px;
+  border-radius: 3px 3px 0 0; background: #4a4a4a; overflow: hidden;
+}
+.rc-hour-new { position: absolute; left: 0; right: 0; bottom: 0; display: block; background: #a6a6a6; }
+.rc-hours-ends {
+  display: flex; justify-content: space-between; gap: 12px;
+  margin: 6px 0 0; font-size: 12px; line-height: 1.3; color: var(--bts-grey); font-variant-numeric: tabular-nums;
+}
+
+/* ---- Wallet links ---------------------------------------------------------------------------------------------- */
+.rc-links-checking { margin-top: 0; font-size: 14px; }
+.rc-links-unavailable { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0; font-size: 14px; color: var(--bts-grey); }
+.rc-funder { margin: 0; font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
+.rc-link-list { margin-top: 12px; }
+.rc-link-wallets { color: var(--bts-grey); }
+.rc-links-none { margin: 10px 0 0; font-size: 15px; line-height: 1.45; }
+.rc-ignored { margin-top: 8px; }
+.rc-ignored > summary { font-size: 13px; font-weight: 600; color: var(--bts-grey); }
+.rc-ignored-list {
+  display: grid; gap: 4px; margin: 4px 0 0 calc(1em + 4px); padding: 0; list-style: none;
+  font-size: 13px; line-height: 1.45; color: var(--bts-grey); overflow-wrap: anywhere;
+}
+
+.rc-retry:focus-visible, .rc-fold > summary:focus-visible { outline: 2px solid var(--bts-fg); outline-offset: 2px; border-radius: 4px; }
+
+/* ---- phones (narrow cards) ----------------------------------------------------------------------------------- */
+@container bts-card (max-width: 620px) {
+  .rc-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rc-wallet { grid-template-columns: 12px minmax(0, 1fr) auto; }
+  .rc-wallet-status { grid-column: 2 / -1; font-size: 13px; }
+}
+@container bts-card (max-width: 520px) {
+  .rc-step { grid-template-columns: 14px minmax(0, 1fr); gap: 0 10px; }
+  .rc-step::before { left: 6.5px; }
+  .rc-step-rel { display: none; }
+  .rc-step-rel-in { display: inline; }
+  .rc-step-text { font-size: 14.5px; }
+  .rc-step-body { row-gap: 4px; }
+  .rc-more { margin-left: 24px; }
+  .rc-hours { height: 60px; gap: 2px; }
+  .rc-official .cc-tool { min-height: 36px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rc-progress-fill { transition: none; }
+}

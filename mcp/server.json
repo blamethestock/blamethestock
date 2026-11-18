@@ -1,0 +1,34 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.blamethestock/blamethestock",
+  "title": "Blame the Stock",
+  "description": "Read-only Robinhood Chain coin research: blame split, copycat check, launch report. Not advice.",
+  "version": "0.1.0",
+  "websiteUrl": "https://blamethestock.com",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "blamethestock-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "BTS_API_BASE",
+          "description": "Optional. Base URL of the Blame the Stock API (default https://api.blamethestock.com).",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string",
+          "default": "https://api.blamethestock.com"
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.blamethestock.com/mcp"
+    }
+  ]
+}
