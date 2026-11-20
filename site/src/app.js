@@ -219,6 +219,7 @@ function copies(query, { reveal: show = null } = {}) {
     if (!res || res.ok !== true) copyFor = null;   // the next lookup of the same coin asks again
     card.renderCopies(out, res, SETTINGS);
     if (show) show(out);                         // a ticker search: bring the finished card into view
+    if (res && res.ok === true && res.status !== 'reading') countChecked(res, query);
   }).catch(() => {
     if (!live()) return;
     copyFor = null;
@@ -228,6 +229,17 @@ function copies(query, { reveal: show = null } = {}) {
     out.textContent = '';
     out.append(p);
   });
+}
+
+// The live counter: one "coin checked" per coin (or ticker) per page view, and the copies this check flagged.
+function countChecked(res, query) {
+  const flagged = (Array.isArray(res.matches) ? res.matches : [])
+    .filter((m) => m && !m.isQuery && !m.isOfficial && Array.isArray(m.flags) && m.flags.some((f) => f && f.severity === 'warn')).length;
+  const key = String(query || '').toLowerCase();
+  import('./ui/stats.js').then((m) => {
+    m.countEvent('check', 1, key);
+    if (flagged) m.countEvent('flag', flagged, key);
+  }).catch(() => { /* the counter never matters to the card */ });
 }
 
 // ---- Launch report (settings.trust.report) -------------------------------------------------------
@@ -251,6 +263,7 @@ function report(address) {
     if (!live()) return;
     const res = await card.showReport(out, address, SETTINGS, { live });
     if (live() && (!res || res.ok !== true)) reportFor = null;   // the next lookup of the same coin asks again
+    if (live() && res && res.ok === true) import('./ui/stats.js').then((m) => m.countEvent('check', 1, address)).catch(() => {});
   }).catch(() => {
     if (!live()) return;
     reportFor = null;

@@ -270,3 +270,4 @@ a.cc-symbol:hover { text-decoration: underline; text-underline-offset: 4px; }
 .rd-fact dd { margin: 0; font-weight: 700; font-size: 16px; }
 .rd-tools .cc-tool { text-decoration: none; }
 .rd-official { margin: 0 0 14px; padding: 10px 14px; border: 1px solid var(--line-strong, #3a3a3a); border-radius: 12px; font-size: 15px; }
+.hero-stats-part { white-space: nowrap; }

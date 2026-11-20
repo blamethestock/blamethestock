@@ -71,9 +71,15 @@ const SQL_SCHEMA = [
   'CREATE INDEX IF NOT EXISTS idx_api_jobs_created ON api_jobs (created)',
   // Blame counter: one row per UTC day, just a number (no IPs, no coins, nothing about the visitor).
   'CREATE TABLE IF NOT EXISTS blame_counts (day INTEGER PRIMARY KEY, n INTEGER NOT NULL)',
+  // Coins checked (copy checks and launch reports) and copies flagged: one number per UTC day and kind, nothing else.
+  'CREATE TABLE IF NOT EXISTS event_counts (day INTEGER NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, kind))',
 ];
 // One row write per counted blame (INTEGER PRIMARY KEY: no extra index to write).
 const SQL_COUNT_ADD = 'INSERT INTO blame_counts (day, n) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET n = n + 1';
+const SQL_EVENT_ADD = 'INSERT INTO event_counts (day, kind, n) VALUES (?1, ?2, ?3) ON CONFLICT(day, kind) DO UPDATE SET n = n + ?3';
+const SQL_EVENT_GET = 'SELECT kind, COALESCE(SUM(n), 0) AS total, COALESCE(SUM(CASE WHEN day = ?1 THEN n ELSE 0 END), 0) AS today FROM event_counts GROUP BY kind';
+export const COUNT_KINDS = ['blame', 'check', 'flag'];
+const COUNT_MAX = 10;                       // one request adds at most this much (a copy check flags a few coins)
 const SQL_COUNT_GET = 'SELECT COALESCE(SUM(n), 0) AS total, COALESCE(SUM(CASE WHEN day = ? THEN n ELSE 0 END), 0) AS today, MIN(day) AS since FROM blame_counts';
 const STATS_SECONDS = 30;          // the counter answer is cached this long (Cloudflare and browsers)
 const SQL_META = 'SELECT key, value FROM meta';
@@ -663,11 +669,17 @@ const RATE_LIMITED = (path) => path === '/mcp' || path === '/v1/alerts' || path 
 // POST /v1/count: the site sends one after each blame card it draws (no body; nothing about the visitor is kept,
 // the rate limit counts in memory only). GET /v1/stats: { today, total, since } with today = the current UTC day.
 const dayOf = (ms) => Math.floor(ms / 86400000);
-async function countBody(deps) {
+async function countBody(deps, params = null) {
   if (!deps.db) return { status: 503, body: { ok: false, code: 'unavailable', message: 'Counter unavailable right now.' } };
+  const kind = (params && params.get('kind')) || 'blame';
+  const n = params && params.has('n') ? Number(params.get('n')) : 1;
+  if (!COUNT_KINDS.includes(kind) || !Number.isInteger(n) || n < 1 || n > COUNT_MAX) {
+    return { status: 400, body: { ok: false, code: 'bad-input', message: 'kind must be blame, check or flag; n 1 to ' + COUNT_MAX + '.' } };
+  }
   try {
     await ensureTables(deps.db);
-    await deps.db.prepare(SQL_COUNT_ADD).bind(dayOf(deps.now)).run();
+    if (kind === 'blame') await deps.db.prepare(SQL_COUNT_ADD).bind(dayOf(deps.now)).run();
+    else await deps.db.prepare(SQL_EVENT_ADD).bind(dayOf(deps.now), kind, n).run();
     return { status: 200, body: { ok: true } };
   } catch (e) {
     return { status: 503, body: { ok: false, code: 'unavailable', message: 'Counter unavailable right now.' } };
@@ -680,7 +692,10 @@ async function statsBody(deps) {
     const r = await deps.db.prepare(SQL_COUNT_GET).bind(dayOf(deps.now)).first();
     const num = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.floor(Number(v)) : 0);
     const since = r && r.since != null && Number.isFinite(Number(r.since)) ? new Date(Number(r.since) * 86400000).toISOString().slice(0, 10) : null;
-    return { status: 200, body: { ok: true, today: num(r && r.today), total: num(r && r.total), since, day: 'UTC' }, cacheSeconds: STATS_SECONDS };
+    const ev = await deps.db.prepare(SQL_EVENT_GET).bind(dayOf(deps.now)).all();
+    const of = (k) => { const x = ((ev && ev.results) || []).find((e) => e.kind === k); return { today: num(x && x.today), total: num(x && x.total) }; };
+    return { status: 200, body: { ok: true, today: num(r && r.today), total: num(r && r.total), since, day: 'UTC',
+      checks: of('check'), flags: of('flag') }, cacheSeconds: STATS_SECONDS };
   } catch (e) {
     return { status: 503, body: { ok: false, code: 'unavailable', message: 'Stats unavailable right now.' } };
   }
@@ -711,7 +726,7 @@ async function handle(request, env, ctx, deps) {
     }
     const rl = await limit(request, deps);
     if (!rl.ok) return rateLimited(cors, deps, rl);
-    const r = await countBody(deps);
+    const r = await countBody(deps, url.params);
     return jsonAnswer(r.status, r.body, { headers: cors });
   }
   if (method !== 'GET' && method !== 'HEAD') {
@@ -862,7 +877,7 @@ function requestDeps(request, env, ctx, extra = {}) {
 const internals = {
   VERSION, DEFAULT_ORIGINS, RATE, TTL, BROWSER_SECONDS, HEALTH_SECONDS, INDEXER_SUBREQUESTS, INDEXER_LOG_SPAN, INDEXER_LOG_REQUESTS,
   INDEXER_MAX_BLOCKS, INDEXER_MAX_ROWS, AVOID, REPORT_NOTE, LINKS_NOTE,
-  SQL_SCHEMA, SQL_COUNT_ADD, SQL_COUNT_GET, STATS_SECONDS, SQL_META, SQL_OLDEST_TIME, SQL_NEWEST_AT, SQL_CACHE_GET, SQL_CACHE_PUT, SQL_CACHE_PURGE, SQL_JOBS_PURGE,
+  SQL_SCHEMA, SQL_COUNT_ADD, SQL_COUNT_GET, SQL_EVENT_ADD, SQL_EVENT_GET, STATS_SECONDS, SQL_META, SQL_OLDEST_TIME, SQL_NEWEST_AT, SQL_CACHE_GET, SQL_CACHE_PUT, SQL_CACHE_PURGE, SQL_JOBS_PURGE,
   rowCachedIndex, parseUrl, allowedOrigins, corsHeaders, preflightHeaders, hashKey, createRateLimiter, settingsFor, statusFor,
   jsonAnswer, toResponse, routedFetch, withBudget, useAsyncLocalStorage, requestLanes, _resetForTests, ensureTables, cfCache, d1Get, d1Put, cacheGet,
   cachePut, healthBody, countBody, statsBody, copiesBody, reportBody, linksBody, reportBasicsOf, handle, runScheduled, requestDeps,

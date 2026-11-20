@@ -19,7 +19,8 @@ function fakeD1({ meta = {}, oldest = null } = {}) {
   const cache = new Map();   // key -> { body, expires }
   const jobs = new Map();    // key -> row
   const counts = new Map();  // day -> n (the blame counter)
-  const db = { cache, jobs, meta, counts, queries: 0, log: [] };
+  const events = new Map();  // 'day|kind' -> n (coins checked, copies flagged)
+  const db = { cache, jobs, meta, counts, events, queries: 0, log: [] };
   const exec = (sql, a) => {
     db.log.push(sql);
     if (W.SQL_SCHEMA.includes(sql)) return { results: [] };
@@ -35,6 +36,16 @@ function fakeD1({ meta = {}, oldest = null } = {}) {
         if (!counts.size) return { results: [{ total: 0, today: 0, since: null }] };
         const total = [...counts.values()].reduce((x, y) => x + y, 0);
         return { results: [{ total, today: counts.get(a[0]) || 0, since: Math.min(...counts.keys()) }] };
+      }
+      case W.SQL_EVENT_ADD: events.set(a[0] + '|' + a[1], (events.get(a[0] + '|' + a[1]) || 0) + a[2]); return { results: [] };
+      case W.SQL_EVENT_GET: {
+        const by = new Map();
+        for (const [k, n] of events) {
+          const [day, kind] = k.split('|');
+          const x = by.get(kind) || { kind, total: 0, today: 0 };
+          x.total += n; if (Number(day) === a[0]) x.today += n; by.set(kind, x);
+        }
+        return { results: [...by.values()] };
       }
       default: throw new Error('fake D1: unexpected SQL ' + sql.slice(0, 80));
     }
@@ -149,12 +160,12 @@ suite('worker › blame counter');
 test('POST /v1/count adds one to today (UTC); GET /v1/stats gives today, total and the first day; nothing about the visitor', async () => {
   const db = fakeD1();
   const empty = await call('/v1/stats', { db });
-  eq([empty.status, empty.json], [200, { ok: true, today: 0, total: 0, since: null, day: 'UTC' }]);
+  eq([empty.status, empty.json], [200, { ok: true, today: 0, total: 0, since: null, day: 'UTC', checks: { today: 0, total: 0 }, flags: { today: 0, total: 0 } }]);
   const DAY = 86400000, now = Date.UTC(2026, 10, 20, 15, 0, 0);
   for (let i = 0; i < 3; i++) eq((await call('/v1/count', { db, method: 'POST', now: now - DAY })).status, 200);
   for (let i = 0; i < 2; i++) eq((await call('/v1/count', { db, method: 'POST', now, origin: 'https://blamethestock.com' })).json, { ok: true });
   const st = await call('/v1/stats', { db, now, origin: 'https://blamethestock.com' });
-  eq(st.json, { ok: true, today: 2, total: 5, since: '2026-11-19', day: 'UTC' });
+  eq(st.json, { ok: true, today: 2, total: 5, since: '2026-11-19', day: 'UTC', checks: { today: 0, total: 0 }, flags: { today: 0, total: 0 } });
   eq(st.headers['access-control-allow-origin'], 'https://blamethestock.com');
   ok(/max-age=30/.test(st.headers['cache-control'] || ''), String(st.headers['cache-control']));
   eq([...db.counts.keys()].length, 2, 'one row per day, holding only a number');
@@ -590,4 +601,16 @@ test('radar: % of the curve threshold, graduated and unread curves left out, hig
   eq(out.map((c) => [c.symbol, c.pct]), [['C1', 50], ['C4', 10]]);
   eq([out[0].ethIn, out[0].thresholdEth, out[0].ageSeconds], [2.1, 4.2, 600]);
   ok(/pair_token = '0x0{40}'/.test(SQL_RADAR) && /NOT EXISTS \(SELECT 1 FROM graduations/.test(SQL_RADAR), 'ETH pairs only, graduated coins left out');
+});
+
+test('counter: coins checked and copies flagged, one number per day and kind; bad kinds and amounts refused', async () => {
+  const db = fakeD1();
+  eq((await call('/v1/count?kind=check', { db, method: 'POST' })).status, 200);
+  eq((await call('/v1/count?kind=flag&n=3', { db, method: 'POST' })).status, 200);
+  eq((await call('/v1/count', { db, method: 'POST' })).status, 200, 'no kind = a blame, as before');
+  eq((await call('/v1/count?kind=visitor', { db, method: 'POST' })).status, 400);
+  eq((await call('/v1/count?kind=flag&n=50', { db, method: 'POST' })).status, 400);
+  eq([...db.events.values()], [1, 3]);
+  const j = (await call('/v1/stats', { db })).json;
+  eq([j.today, j.checks, j.flags], [1, { today: 1, total: 1 }, { today: 3, total: 3 }]);
 });

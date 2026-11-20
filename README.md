@@ -69,6 +69,7 @@ python3 dev/tools/recompute_split.py 0x2e8c31162b855a2ffa90f6f8634643ad6f111e18 
 | Share to X on every result (blame split, copy check, launch report) | **Live** |
 | Copycat alerts: Pons launches of the last 24 h using the name or ticker of a coin that already graduated, with a ready-to-post warning | **Live** |
 | Graduation radar: ETH-paired Pons coins of the last 48 h closest to graduating (% of 4.2 ETH), with holders, dev % and first-buyer % | **Live** |
+| Live counter: blames run, coins checked and copies flagged, today (UTC) and all time; one number per day, nothing about visitors | **Live** |
 | MCP server, hosted at `https://api.blamethestock.com/mcp` (tools: `blame_split`, `check_copycats`, `launch_report`) | **Live** |
 | MCP npm package (`npx blamethestock-mcp`) and directory listings | Planned |
 | $BLAME receipts on the site (dev buy, sells, burns, fee claims, live from the chain) | **Live** |
@@ -97,7 +98,7 @@ The only official contract address is the one on [blamethestock.com](https://bla
 
 ## Privacy
 
-No wallet connection, no login, no cookies, no analytics. The API doesn't store visitor IP addresses; they're only used in memory for rate limiting. The blame counter stores one number per day.
+No wallet connection, no login, no cookies, no analytics. The API doesn't store visitor IP addresses; they're only used in memory for rate limiting. The live counter stores one number per day for each of blames run, coins checked (copy checks and launch reports, once per coin per visit) and copies flagged (same-name coins a copy check showed with a warning flag). Nothing about the visitor is stored.
 
 ## License
 
