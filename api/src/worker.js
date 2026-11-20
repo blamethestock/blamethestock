@@ -26,7 +26,9 @@
 // pieces as `deps`, so dev/tests/worker.test.js runs them in jsc with fakes.
 import { createBudget, DEFAULT_LIMIT, DEFAULT_D1_LIMIT } from './budget.js';
 import { copyMatches, d1Index } from './copies.js';
-import { runIndexer } from './indexer.js';
+import { runIndexer, encodeAggregate3, decodeAggregate3 } from './indexer.js';
+import { MULTICALL3 } from './env.js';
+import { rpcBatch } from '../../site/src/data/rpc.js';
 import { INDEX_FLOOR } from './env.js';
 import { SETTINGS } from '../../site/settings.js';
 import { _setTransport, _setLaneScope } from '../../site/src/data/rpc.js';
@@ -519,6 +521,91 @@ async function alertsBody(deps) {
 }
 
 // =============================================================================================================
+// GET /v1/radar: ETH-paired Pons coins of the last 48 h closest to graduating (ETH in the curve / its threshold)
+// =============================================================================================================
+// One D1 read (indexed by block) and a few Multicall3 batches of realQuoteReserve() + graduated() on dRPC.
+// Holders, dev % and first-buyer % are read by the website in the visitor's browser for the top rows.
+export const RADAR_HOURS = 48;
+export const RADAR_TOP = 15;
+const RADAR_SECONDS = 120;
+const RADAR_PER_CALL = 200;
+const SEL_REAL_QUOTE = '0x4f1f58fd';
+const SEL_GRADUATED = '0xe7c2b772';
+const ETH = '0x0000000000000000000000000000000000000000';
+export const SQL_RADAR = `
+SELECT token, curve, symbol, name, block, time, creator, tx_from, tx, graduation_threshold FROM launches
+WHERE block >= (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'last_block') - ?1
+  AND pair_token = '${ETH}'
+  AND NOT EXISTS (SELECT 1 FROM graduations g WHERE g.token = launches.token)`;
+
+// rows + [{ quote (bigint wei) | null, graduated (bool) | null }] -> the top coins by % of their threshold.
+export function radarFrom(rows, reads, nowSec, top = RADAR_TOP) {
+  const out = [];
+  rows.forEach((r, i) => {
+    const x = reads[i];
+    if (!x || x.quote == null || x.graduated !== false || !isAddr(r.token) || !isAddr(r.curve)) return;
+    let th;
+    try { th = BigInt(r.graduation_threshold); } catch (e) { return; }
+    if (th <= 0n || x.quote <= 0n) return;
+    const pct = Math.min(100, Number((x.quote * 100000n) / th) / 1000);
+    out.push({
+      address: r.token, curve: r.curve, symbol: r.symbol ?? null, name: r.name ?? null,
+      launch: { block: Number(r.block), time: r.time == null ? null : Number(r.time), tx: r.tx },
+      ageSeconds: r.time == null ? null : Math.max(0, nowSec - Number(r.time)),
+      dev: isAddr(r.tx_from) ? r.tx_from : r.creator,
+      ethIn: Number(x.quote) / 1e18, thresholdEth: Number(th) / 1e18, pct,
+    });
+  });
+  return out.sort((a, b) => b.pct - a.pct || b.launch.block - a.launch.block).slice(0, top);
+}
+
+export async function readCurves(curves) {
+  const reads = new Array(curves.length).fill(null);
+  const word = (hex) => (hex && hex.length >= 66 ? BigInt(hex.slice(0, 66)) : null);
+  const groups = [];
+  for (let i = 0; i < curves.length; i += RADAR_PER_CALL) groups.push(i);
+  for (let g = 0; g < groups.length; g += 3) {                 // dRPC: 3 calls per batch request
+    const batch = groups.slice(g, g + 3).map((i) => ({ i, list: curves.slice(i, i + RADAR_PER_CALL) }));
+    const calls = batch.map(({ list }) => ({ method: 'eth_call', params: [{ to: MULTICALL3,
+      data: encodeAggregate3(list.flatMap((c) => [{ target: c, data: SEL_REAL_QUOTE }, { target: c, data: SEL_GRADUATED }])) }, 'latest'] }));
+    const res = await rpcBatch('drpc', calls, { tries: 3 });
+    batch.forEach(({ i, list }, k) => {
+      const r = res[k];
+      if (!r || !r.result) return;
+      const items = decodeAggregate3(r.result);
+      list.forEach((c, j) => {
+        const q = items[2 * j], gr = items[2 * j + 1];
+        reads[i + j] = { quote: q && q.success ? word(q.data) : null, graduated: gr && gr.success && word(gr.data) != null ? word(gr.data) !== 0n : null };
+      });
+    });
+  }
+  return reads;
+}
+
+async function radarBody(deps) {
+  if (!deps.db) return fail('unavailable', 'The graduation radar is unavailable right now.');
+  const hit = await cacheGet(deps, 'radar');
+  if (hit) return { status: 200, body: hit, cacheSeconds: RADAR_SECONDS };
+  try {
+    const res = await deps.db.prepare(SQL_RADAR).bind(Math.round((RADAR_HOURS * 3600) / 0.1045)).all();
+    const rows = (res && res.results) || [];
+    const reads = await (deps.readCurves || readCurves)(rows.map((r) => r.curve));
+    const all = radarFrom(rows, reads, Math.floor(deps.now / 1000), Infinity);
+    const coins = all.slice(0, RADAR_TOP);
+    const offs = new Set(((deps.settings && deps.settings.trust && deps.settings.trust.official) || []).map((o) => String(o.address).toLowerCase()));
+    const oi = all.findIndex((c) => offs.has(c.address));
+    const official = oi >= 0 ? { ...all[oi], rank: oi + 1 } : null;
+    const body = { ok: true, hours: RADAR_HOURS, checked: rows.length, asOf: new Date(deps.now).toISOString(), coins, official,
+      about: 'ETH-paired Pons coins launched in the last 48 hours that have not graduated, by ETH in their launch curve '
+        + 'compared with the curve\'s graduation threshold (4.2 ETH). Read from Robinhood Chain; not financial advice.' };
+    await cachePut(deps, 'radar', body, RADAR_SECONDS);
+    return { status: 200, body, cacheSeconds: RADAR_SECONDS };
+  } catch (e) {
+    return fail('unavailable', 'The graduation radar is unavailable right now.');
+  }
+}
+
+// =============================================================================================================
 // GET /v1/report/{token} and /v1/report/{token}/links
 // =============================================================================================================
 const REPORT_NOTE = 'The launch report (dev moves, first buyers, fees, bridges, activity) is read from Robinhood Chain '
@@ -570,7 +657,7 @@ function linksBody(rawToken) {
 // =============================================================================================================
 // The router
 // =============================================================================================================
-const RATE_LIMITED = (path) => path === '/mcp' || path === '/v1/alerts' || path === '/v1/count' || path.startsWith('/v1/copies') || path.startsWith('/v1/report');
+const RATE_LIMITED = (path) => path === '/mcp' || path === '/v1/alerts' || path === '/v1/radar' || path === '/v1/count' || path.startsWith('/v1/copies') || path.startsWith('/v1/report');
 
 // ---- the blame counter ----------------------------------------------------------------------------------------
 // POST /v1/count: the site sends one after each blame card it draws (no body; nothing about the visitor is kept,
@@ -639,7 +726,7 @@ async function handle(request, env, ctx, deps) {
     return jsonAnswer(200, {
       ok: true, service: 'bts-api', version: VERSION,
       about: 'Read-only facts about Robinhood Chain coins. Not financial advice. The launch index is served here; chain facts are read by the website in your browser.',
-      endpoints: ['/v1/health', '/v1/stats', '/v1/alerts', '/v1/copies?q=TICKER|0xADDRESS', '/v1/report/0xTOKEN', '/v1/report/0xTOKEN/links', '/mcp'],
+      endpoints: ['/v1/health', '/v1/stats', '/v1/alerts', '/v1/radar', '/v1/copies?q=TICKER|0xADDRESS', '/v1/report/0xTOKEN', '/v1/report/0xTOKEN/links', '/mcp'],
       site: 'https://blamethestock.com',
     }, { cacheSeconds: 300, headers: cors });
   }
@@ -652,6 +739,7 @@ async function handle(request, env, ctx, deps) {
     return jsonAnswer(r.status, r.body, { cacheSeconds: r.status === 200 ? r.cacheSeconds : 0, headers: cors });
   }
   if (path === '/v1/alerts') return out(await alertsBody(deps));
+  if (path === '/v1/radar') return out(await radarBody(deps));
   if (path === '/v1/copies') {
     const p = url.params;
     const hint = p.has('name') || p.has('symbol') ? { name: p.get('name'), symbol: p.get('symbol') } : null;

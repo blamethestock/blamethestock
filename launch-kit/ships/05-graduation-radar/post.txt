@@ -1,0 +1,9 @@
+POST:
+Shipped: graduation radar on blamethestock.com
+
+The Pons coins closest to graduating, read live from their launch curves: % of the 4.2 ETH target, holders, how much the dev bought, and how much the first-5-second buyers took.
+
+Each one links to its launch report.
+
+REPLY:
+The live radar: https://blamethestock.com/#radar

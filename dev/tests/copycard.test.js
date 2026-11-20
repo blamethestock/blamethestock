@@ -10,6 +10,7 @@ import { loadFixture, runScenario, replayFetch, fixtureIndex, OBSYN } from './fi
 import { copyMatches } from '../../api/src/copies.js';
 import { reportShare, copiesShare, viewLink } from '../../site/src/ui/x-share.js';
 import { alertView } from '../../site/src/ui/alerts.js';
+import { radarView, factsText } from '../../site/src/ui/radar.js';
 import { _setTransport } from '../../site/src/data/rpc.js';
 
 suite('copy check › card');
@@ -399,4 +400,13 @@ test('copycat alerts: one row per new coin, facts only, a warning post with both
   ok(intent(v.postUrl).text.length <= 200);
   eq(alertView({ copy: { address: 'bad' }, graduated: { address: grad } }), null);
   ok(/3 graduated coins use this name/.test(alertView({ copy: { address: copy, symbol: '<x>' }, graduated: { address: grad, symbol: '<x>' }, matchedOn: 'name', graduatedSameName: 3 }).line));
+});
+
+test('graduation radar rows: % to graduation, ETH in the curve, a launch report link; facts say "unknown" when unread', () => {
+  const v = radarView({ address: OBSYN.real, curve: OBSYN.copy, symbol: 'OBSYN', name: 'obsyn', pct: 58.34, ethIn: 2.449, thresholdEth: 4.2, ageSeconds: 7200, launch: { block: 1, time: 1, tx: '0x' + 'a'.repeat(64) } });
+  eq([v.title, v.pctLabel, v.eth, v.when], ['$OBSYN · obsyn', '58% to graduation', '2.45 of 4.2 ETH', 'launched 2 hours ago']);
+  eq(v.reportUrl, 'https://blamethestock.com/?ca=' + OBSYN.real + '&view=report');
+  eq(factsText({ devPct: 1.59, sniperPct: 5.82, snipers: 4, holders: 87 }), { dev: '1.6%', snipers: '5.8% (4)', holders: '87' });
+  eq(factsText({ devPct: null, sniperPct: null, holders: null }).dev, 'unknown');
+  eq(radarView({ address: 'x', pct: 1 }), null);
 });

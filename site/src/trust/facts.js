@@ -582,6 +582,20 @@ async function readRecentTrades(r, ctx) {
 }
 
 // ---- all facts for one coin ---------------------------------------------------------------------------------
+// The graduation radar's three facts for one coin, lighter than gatherFacts: dev buy % (launch tx), first buyers'
+// % (launch block + sniper window) and holders (explorer, else Transfer logs). Each part may come back null.
+export async function radarFacts(row, ctx) {
+  const r = normalizeRow(row);
+  const out = { devPct: null, sniperPct: null, snipers: null, holders: null };
+  let launch = null;
+  try { launch = await readLaunch(r, ctx); out.devPct = launch.devBuy ? launch.devBuy.pctSupply : 0; } catch (e) { /* unknown */ }
+  await Promise.all([
+    launch ? readSnipers(r, launch, ctx).then((s) => { out.snipers = s.length; out.sniperPct = s.reduce((a, x) => a + (x.pctSupply || 0), 0); }, () => {}) : null,
+    readHolders(r, null, ctx).then((h) => { out.holders = h ? h.count : null; }, () => {}),
+  ]);
+  return out;
+}
+
 export async function gatherFacts(row, ctx) {
   const r = normalizeRow(row);
   const f = {

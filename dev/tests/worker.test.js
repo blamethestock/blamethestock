@@ -1,7 +1,7 @@
 // API Worker core (api/src/worker.js via its default export's `internals`, api/src/budget.js): routing, CORS, rate limit, caching, staged copy check,
 // report/link jobs, the cron, and the subrequest budget. Runs in jsc with fakes: no network, no Cloudflare.
 import { suite, test, eq, ok } from './harness.js';
-import worker, { alertsFromRows, SQL_ALERTS } from '../../api/src/worker.js';
+import worker, { alertsFromRows, SQL_ALERTS, radarFrom, SQL_RADAR } from '../../api/src/worker.js';
 import { createBudget, refusal, isRefusal, wrapDb, BudgetExceeded } from '../../api/src/budget.js';
 import { _setTransport, byHealth } from '../../site/src/data/rpc.js';
 import { runCopyCheck } from '../../site/src/trust/copycheck.js';
@@ -575,4 +575,19 @@ test('alerts: rows -> one alert per new coin, with the graduated coin and how ma
   eq(out[0].copy.dev, c);
   eq([out[0].graduated.address, out[0].matchedOn, out[0].graduatedSameName], [b, 'ticker', 26]);
   ok(/graduations g ON g\.sym_skel = r\.sym_skel/.test(SQL_ALERTS) && /length\(r\.sym_skel\) >= 3/.test(SQL_ALERTS), 'matched by index, short names left out');
+});
+
+test('radar: % of the curve threshold, graduated and unread curves left out, highest first', () => {
+  const t = (n) => '0x' + String(n).repeat(40);
+  const rows = [1, 2, 3, 4].map((n) => ({ token: t(n), curve: t(n + 4), symbol: 'C' + n, block: 100 + n, time: 1000, tx: '0x' + 'a'.repeat(64), creator: t(9), graduation_threshold: '4200000000000000000' }));
+  const reads = [
+    { quote: 2100000000000000000n, graduated: false },
+    { quote: 4200000000000000000n, graduated: true },
+    null,
+    { quote: 420000000000000000n, graduated: false },
+  ];
+  const out = radarFrom(rows, reads, 1600);
+  eq(out.map((c) => [c.symbol, c.pct]), [['C1', 50], ['C4', 10]]);
+  eq([out[0].ethIn, out[0].thresholdEth, out[0].ageSeconds], [2.1, 4.2, 600]);
+  ok(/pair_token = '0x0{40}'/.test(SQL_RADAR) && /NOT EXISTS \(SELECT 1 FROM graduations/.test(SQL_RADAR), 'ETH pairs only, graduated coins left out');
 });

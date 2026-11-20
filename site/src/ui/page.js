@@ -264,6 +264,17 @@ function fillReceipts() {
 
 // ---- blame counter (hero line) ----
 // Copycat alerts load when the section is close to view (one API call per page view, cached 2 min).
+function whenNear(el, go) {
+  if (!('IntersectionObserver' in window)) { go(); return; }
+  const io = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) { io.disconnect(); go(); }
+  }, { rootMargin: '400px 0px' });
+  io.observe(el);
+}
+function fillRadar() {
+  const el = byId('radar-body');
+  if (el) whenNear(el, () => import('./radar.js').then((m) => m.showRadar(el)).catch(() => { el.textContent = 'The graduation radar is unavailable right now.'; }));
+}
 function fillAlerts() {
   const el = byId('alerts-body');
   if (!el) return;
@@ -398,7 +409,7 @@ function safely(step) {
 function boot() {
   let font = { ready: Promise.resolve() };
   safely(() => { font = loadFont(); });
-  [fillMenu, fillHero, fillMarquee, fillToken, fillReceipts, fillStats, fillAlerts, fillUpdates, fillFooter, wirePasteButtons, startBoard].forEach(safely);
+  [fillMenu, fillHero, fillMarquee, fillToken, fillReceipts, fillStats, fillAlerts, fillRadar, fillUpdates, fillFooter, wirePasteButtons, startBoard].forEach(safely);
   safely(() => initMotion({ ratio: S.headline && S.headline.widthOfScreen, fontReady: font.ready }));
   document.documentElement.classList.add('page-ok');
 

@@ -13,6 +13,7 @@
 - **Blame split.** Paste a coin's address. The site shows how much of its price move over 1h, 6h, 24h or 7d came from its pair (a stock token, ETH or another coin) and how much came from the coin itself. Every number links to its proof on the Robinhood Chain explorer: the coin, the pool or launch curve, and the start and end blocks.
 - **Fake-copy warning ("Is this the real one?").** Paste an address or a ticker. It lists every Pons launch using the same name, including look-alike letters and hidden characters, with launch time, dev wallet, what the dev bought and sold, fees claimed, money bridged out and graduation. It flags patterns such as "launched just before", "dev dumped fast" and "took fees and left", and labels the coin that clearly leads on holders, graduation and money in it. It never declares which coin is "real". Only the official $BLAME address gets a ✅ badge.
 - **Copycat alerts.** A live list of new Pons coins (last 24 hours) that use the name or ticker of a Pons coin that already graduated, with both addresses and a ready-to-post warning. Graduation is the reference because it takes real buys; trading-volume numbers on Robinhood Chain are easy to fake.
+- **Graduation radar.** The ETH-paired Pons coins of the last 48 hours closest to graduating: ETH in the launch curve against its 4.2 ETH threshold, with holders, the dev's buy and the first buyers' share, each linking to its launch report.
 - **Launch report.** For any Pons coin: what the dev did (buy, sends, burns, sells, fee claims), who bought in the first ~5 seconds and whether they sold, and wallet links (shared funders) loaded separately.
 
 ## How the split is calculated
@@ -67,6 +68,7 @@ python3 dev/tools/recompute_split.py 0x2e8c31162b855a2ffa90f6f8634643ad6f111e18 
 | Launch report with wallet links | **Live** |
 | Share to X on every result (blame split, copy check, launch report) | **Live** |
 | Copycat alerts: Pons launches of the last 24 h using the name or ticker of a coin that already graduated, with a ready-to-post warning | **Live** |
+| Graduation radar: ETH-paired Pons coins of the last 48 h closest to graduating (% of 4.2 ETH), with holders, dev % and first-buyer % | **Live** |
 | MCP server, hosted at `https://api.blamethestock.com/mcp` (tools: `blame_split`, `check_copycats`, `launch_report`) | **Live** |
 | MCP npm package (`npx blamethestock-mcp`) and directory listings | Planned |
 | $BLAME receipts on the site (dev buy, sells, burns, fee claims, live from the chain) | **Live** |

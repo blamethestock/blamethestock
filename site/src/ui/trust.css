@@ -253,3 +253,20 @@ a.cc-symbol:hover { text-decoration: underline; text-underline-offset: 4px; }
 .al-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px !important; }
 .al-tools .cc-tool { text-decoration: none; }
 .al-more { margin-top: 12px; }
+
+/* Graduation radar */
+.rd-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.rd-row { border: 1px solid var(--line, #262626); border-radius: 16px; padding: 14px 16px; }
+.rd-row p { margin: 4px 0; }
+.rd-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.rd-sym { font-weight: 800; font-size: 18px; color: inherit; text-decoration: none; }
+.rd-when { color: var(--grey, #8b8b8b); font-size: 14px; }
+.rd-bar { height: 8px; border-radius: 99px; background: #1a1a1a; overflow: hidden; margin: 8px 0 4px; }
+.rd-fill { display: block; height: 100%; background: var(--pair, #2433FF); border-radius: 99px; }
+.rd-pct { font-size: 15px; }
+.rd-eth { color: var(--grey, #8b8b8b); font-size: 14px; }
+.rd-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0 6px; }
+.rd-fact dt { color: var(--grey, #8b8b8b); font-size: 13px; }
+.rd-fact dd { margin: 0; font-weight: 700; font-size: 16px; }
+.rd-tools .cc-tool { text-decoration: none; }
+.rd-official { margin: 0 0 14px; padding: 10px 14px; border: 1px solid var(--line-strong, #3a3a3a); border-radius: 12px; font-size: 15px; }
