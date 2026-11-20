@@ -47,6 +47,19 @@ export function decodeLaunchLog(log) {
   };
 }
 
+// One factory graduation log -> { token, block, tx }, or null.
+export function decodeGraduationLog(log) {
+  if (!log || log.removed === true) return null;
+  const t = log.topics || [];
+  if (t.length < 2 || lower(t[0]) !== E.TOPIC_GRADUATED || !FACTORY_SET.has(lower(log.address))) return null;
+  return { token: addrFromWord(t[1]), block: parseInt(log.blockNumber, 16), tx: lower(log.transactionHash) };
+}
+// The coin's name and skeletons come from its launch row (graduation always follows the launch, so it is indexed).
+export const SQL_GRADUATION_ADD = 'INSERT OR IGNORE INTO graduations (token, block, tx, symbol, name, sym_skel, name_skel) '
+  + 'SELECT ?1, ?2, ?3, l.symbol, l.name, l.sym_skel, l.name_skel FROM (SELECT 1) LEFT JOIN launches l ON l.token = ?1';
+export const SQL_GRADUATIONS_TABLE = 'CREATE TABLE IF NOT EXISTS graduations (token TEXT PRIMARY KEY, block INTEGER NOT NULL, tx TEXT NOT NULL, '
+  + 'symbol TEXT, name TEXT, sym_skel TEXT, name_skel TEXT)';
+
 // Bytes -> text, the WHATWG UTF-8 decoder (bad bytes become U+FFFD, like Python's errors='replace').
 export function utf8Decode(bytes) {
   let out = '', need = 0, cp = 0, lo = 0x80, hi = 0xbf;
@@ -199,7 +212,7 @@ export async function fetchLaunchLogs(addresses, from, to) {
 // were seen. -> { logs, to: last block fully read (from - 1 when nothing was), requests }
 export const CHUNK_BATCH = 3;
 export async function fetchLaunchLogsChunked(addresses, from, to, { span = 100, maxRequests = 20, maxLogs = Infinity } = {}) {
-  const topics = [E.TOPIC_TOKEN_LAUNCHED];
+  const topics = [[E.TOPIC_TOKEN_LAUNCHED, E.TOPIC_GRADUATED]];   // launches and graduations, same requests
   const pieces = [];
   for (let a = from; a <= to; a += span) pieces.push([a, Math.min(to, a + span - 1)]);
   const out = { logs: [], to: from - 1, requests: 0 };
@@ -435,7 +448,12 @@ export async function runIndexer(env, opts = {}) {
   }
 
   // Progress last, in one batch: a run that failed above leaves the cursor where it was (and is redone).
+  // Graduations seen in the same logs (only when reading in chunks, the Worker's way), written with the cursor.
+  const grads = chunked ? logs.map(decodeGraduationLog).filter((g) => g && g.block <= to) : [];
+  summary.graduations = grads.length;
   await db.batch([
+    ...(grads.length ? [db.prepare(SQL_GRADUATIONS_TABLE)] : []),
+    ...grads.map((g) => db.prepare(SQL_GRADUATION_ADD).bind(g.token, g.block, g.tx)),
     db.prepare(SQL_META_ADVANCE).bind(String(to), from),
     db.prepare(SQL_META_OLDEST_INIT).bind(String(from)),
     db.prepare(SQL_META_SET).bind('last_run', String(Math.floor(now() / 1000))),

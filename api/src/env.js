@@ -11,6 +11,8 @@ export { RPC, CHAIN_ID } from '../../site/src/data/constants.js';
 // TokenLaunched(address indexed token, address indexed curve, address indexed creator,
 //               address pairToken, uint256, uint256 graduationThreshold)
 export const TOPIC_TOKEN_LAUNCHED = '0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607';
+// Factory graduation log (topic1 = the coin): the curve reached its threshold and the coin moved to a Uniswap v4 pool.
+export const TOPIC_GRADUATED = '0x0a44ef75df69c534f43cd6c1aa3ef8983065fe5fe79ef9e79f6494e6f258c259';
 
 // Every contract seen emitting TokenLaunched. Index by this list, never by the topic alone.
 // first/last = first and last launch block observed (last null = still launching). The ranges are notes only:

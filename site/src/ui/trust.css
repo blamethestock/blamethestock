@@ -236,3 +236,20 @@ a.cc-symbol:hover { text-decoration: underline; text-underline-offset: 4px; }
 .cc-share { text-decoration: none; }
 .cc-lead { margin: 10px 0 0; padding: 10px 14px; border: 1px solid var(--bts-line-strong, #3a3a3a); border-radius: 12px; font-weight: 600; }
 .cc-row.is-lead .cc-tag:last-of-type { border-color: var(--bts-fg, #fff); }
+
+/* Copycat alerts */
+.alerts-body { max-width: 860px; --bts-fg: var(--fg, #fff); --bts-edge: #3a3a3a; }
+.al-intro, .al-note { color: var(--grey, #8b8b8b); font-size: 15px; line-height: 1.5; margin: 0 0 14px; }
+.al-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.al-row { border: 1px solid var(--line, #262626); border-radius: 16px; padding: 14px 16px; }
+.al-row p { margin: 4px 0; }
+.al-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.al-sym { font-weight: 800; font-size: 18px; color: inherit; text-decoration: none; }
+.al-when { color: var(--grey, #8b8b8b); font-size: 14px; }
+.al-addr { font-size: 13px; word-break: break-all; }
+.al-k { color: var(--grey, #8b8b8b); }
+.al-code, .al-proof { color: inherit; }
+.al-line { font-size: 15px; }
+.al-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px !important; }
+.al-tools .cc-tool { text-decoration: none; }
+.al-more { margin-top: 12px; }

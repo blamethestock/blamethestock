@@ -9,6 +9,7 @@ import { TRUST_DEFAULTS, trustSettings, CAVEATS } from '../../site/src/trust/rul
 import { loadFixture, runScenario, replayFetch, fixtureIndex, OBSYN } from './fixtures/obsyn/replay.js';
 import { copyMatches } from '../../api/src/copies.js';
 import { reportShare, copiesShare, viewLink } from '../../site/src/ui/x-share.js';
+import { alertView } from '../../site/src/ui/alerts.js';
 import { _setTransport } from '../../site/src/data/rpc.js';
 
 suite('copy check › card');
@@ -382,4 +383,20 @@ test('copy check: the coin that clearly leads on holders, graduation and money i
   eq(pickLeader([a, row(null, 1, false)]), null, 'a coin with unread facts: no label');
   eq(pickLeader([a, row(1, 1, false, { pending: true })]), null, 'still reading: no label');
   eq(pickLeader([a]), null, 'one coin: nothing to compare');
+});
+
+test('copycat alerts: one row per new coin, facts only, a warning post with both addresses and a check link', () => {
+  const copy = OBSYN.copy, grad = OBSYN.real;
+  const v = alertView({ copy: { address: copy, symbol: 'OBSYN', name: 'Obsyn', ageSeconds: 720 },
+    graduated: { address: grad, symbol: 'OBSYN', graduationTx: '0x' + 'ab'.repeat(32) }, matchedOn: 'ticker', graduatedSameName: 1 });
+  eq(v.when, '12 min ago');
+  eq(v.line, 'Same ticker as $OBSYN, which graduated on Pons.');
+  eq(v.checkUrl, 'https://blamethestock.com/?ca=' + copy + '&view=copies');
+  const p = intent(v.postUrl);
+  ok(p.text.includes(copy) && p.text.includes(grad), 'both addresses in the post');
+  ok(!/real|scam|fake/i.test(p.text + v.line), 'no "real", "scam" or "fake"');
+  eq(p.url, 'https://blamethestock.com/?q=OBSYN');
+  ok(intent(v.postUrl).text.length <= 200);
+  eq(alertView({ copy: { address: 'bad' }, graduated: { address: grad } }), null);
+  ok(/3 graduated coins use this name/.test(alertView({ copy: { address: copy, symbol: '<x>' }, graduated: { address: grad, symbol: '<x>' }, matchedOn: 'name', graduatedSameName: 3 }).line));
 });

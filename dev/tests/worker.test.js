@@ -1,7 +1,7 @@
 // API Worker core (api/src/worker.js via its default export's `internals`, api/src/budget.js): routing, CORS, rate limit, caching, staged copy check,
 // report/link jobs, the cron, and the subrequest budget. Runs in jsc with fakes: no network, no Cloudflare.
 import { suite, test, eq, ok } from './harness.js';
-import worker from '../../api/src/worker.js';
+import worker, { alertsFromRows, SQL_ALERTS } from '../../api/src/worker.js';
 import { createBudget, refusal, isRefusal, wrapDb, BudgetExceeded } from '../../api/src/budget.js';
 import { _setTransport, byHealth } from '../../site/src/data/rpc.js';
 import { runCopyCheck } from '../../site/src/trust/copycheck.js';
@@ -560,4 +560,19 @@ test('each request gets its own rpc.js lane table (a Worker may not wake one req
   ok(ta && tb && ta !== tb, 'different tables');
   ok(ta === ta2, 'same table within one request');
   eq(I.requestLanes(), null, 'outside a request: the shared table');
+});
+
+test('alerts: rows -> one alert per new coin, with the graduated coin and how many graduated coins share the name', () => {
+  const a = '0x' + '1'.repeat(40), b = '0x' + '2'.repeat(40), c = '0x' + '3'.repeat(40);
+  const rows = [
+    { token: a, symbol: 'MEOW', name: 'Meow', time: 1000, tx_from: null, creator: c, tx: '0x' + 'f'.repeat(64), o_token: b, o_symbol: 'MEOW', o_name: 'Meow', o_grad_block: 5, o_grad_tx: '0x' + 'e'.repeat(64), kind: 'ticker', o_count: 26 },
+    { token: a, symbol: 'MEOW', name: 'Meow', time: 1000, o_token: b, kind: 'name', o_count: 26 },
+    { token: 'nope', o_token: b },
+  ];
+  const out = alertsFromRows(rows, 1600);
+  eq(out.length, 1);
+  eq(out[0].copy.ageSeconds, 600);
+  eq(out[0].copy.dev, c);
+  eq([out[0].graduated.address, out[0].matchedOn, out[0].graduatedSameName], [b, 'ticker', 26]);
+  ok(/graduations g ON g\.sym_skel = r\.sym_skel/.test(SQL_ALERTS) && /length\(r\.sym_skel\) >= 3/.test(SQL_ALERTS), 'matched by index, short names left out');
 });

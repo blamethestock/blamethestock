@@ -107,7 +107,7 @@ function mockChain(rows, opts = {}) {
       if (ep === 'drpc' && b - a > 100) fail('ranges over 100 blocks are not supported on free plan', 35);
       if (b - a > (many ? 99999 : 9999999)) fail('query spans ' + (b - a + 1) + ' blocks, but only 100000 are allowed', -32602);
       const addrs = new Set(many ? f.address : [f.address]);
-      const hit = logs.filter((l) => addrs.has(l.address) && l.topics[0] === f.topics[0]
+      const hit = logs.filter((l) => addrs.has(l.address) && (Array.isArray(f.topics[0]) ? f.topics[0].includes(l.topics[0]) : l.topics[0] === f.topics[0])
         && parseInt(l.blockNumber, 16) >= a && parseInt(l.blockNumber, 16) <= b);
       if (hit.length > o.cap) fail('logs matched by query exceeds limit of 10000');
       return hit;
@@ -639,4 +639,13 @@ test('fixture skeletons equal skeleton.js today (else re-run backfill_launches.p
   const s = await sample();
   const off = s.rows.filter((r) => r.sym_skel !== skeleton(r.symbol) || r.name_skel !== skeleton(r.name));
   eq(off.map((r) => r.token), []);
+});
+
+test('decodeGraduationLog: the factory graduation log -> the coin, block and tx; anything else -> null', () => {
+  const tok = '0x' + 'ab'.repeat(20);
+  const lg = { address: E.FACTORY_ADDRESSES[0], topics: [E.TOPIC_GRADUATED, '0x' + '0'.repeat(24) + tok.slice(2)], data: '0x', blockNumber: '0x10', transactionHash: '0x' + 'CD'.repeat(32) };
+  eq(IX.decodeGraduationLog(lg), { token: tok, block: 16, tx: '0x' + 'cd'.repeat(32) });
+  eq(IX.decodeGraduationLog({ ...lg, address: '0x' + '9'.repeat(40) }), null, 'unknown factory');
+  eq(IX.decodeGraduationLog({ ...lg, topics: [E.TOPIC_TOKEN_LAUNCHED, lg.topics[1]] }), null, 'a launch log');
+  eq(IX.decodeLaunchLog(lg), null, 'the launch decoder ignores it');
 });

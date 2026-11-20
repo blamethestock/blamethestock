@@ -263,6 +263,18 @@ function fillReceipts() {
 }
 
 // ---- blame counter (hero line) ----
+// Copycat alerts load when the section is close to view (one API call per page view, cached 2 min).
+function fillAlerts() {
+  const el = byId('alerts-body');
+  if (!el) return;
+  const go = () => import('./alerts.js').then((m) => m.showAlerts(el)).catch(() => { el.textContent = 'Copycat alerts are unavailable right now.'; });
+  if (!('IntersectionObserver' in window)) { go(); return; }
+  const io = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) { io.disconnect(); go(); }
+  }, { rootMargin: '400px 0px' });
+  io.observe(el);
+}
+
 function fillStats() {
   import('./stats.js').then((m) => m.showStats()).catch(() => { /* the line stays hidden */ });
 }
@@ -386,7 +398,7 @@ function safely(step) {
 function boot() {
   let font = { ready: Promise.resolve() };
   safely(() => { font = loadFont(); });
-  [fillMenu, fillHero, fillMarquee, fillToken, fillReceipts, fillStats, fillUpdates, fillFooter, wirePasteButtons, startBoard].forEach(safely);
+  [fillMenu, fillHero, fillMarquee, fillToken, fillReceipts, fillStats, fillAlerts, fillUpdates, fillFooter, wirePasteButtons, startBoard].forEach(safely);
   safely(() => initMotion({ ratio: S.headline && S.headline.widthOfScreen, fontReady: font.ready }));
   document.documentElement.classList.add('page-ok');
 

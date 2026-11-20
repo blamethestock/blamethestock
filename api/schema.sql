@@ -45,3 +45,9 @@ CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Pons graduations (factory graduation logs): the copycat-alert feed compares new launches with these coins.
+CREATE TABLE IF NOT EXISTS graduations (token TEXT PRIMARY KEY, block INTEGER NOT NULL, tx TEXT NOT NULL,
+  symbol TEXT, name TEXT, sym_skel TEXT, name_skel TEXT);
+CREATE INDEX IF NOT EXISTS idx_grad_sym_skel ON graduations (sym_skel);
+CREATE INDEX IF NOT EXISTS idx_grad_name_skel ON graduations (name_skel);

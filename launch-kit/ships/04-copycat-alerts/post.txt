@@ -1,0 +1,9 @@
+POST:
+Shipped: copycat alerts on blamethestock.com
+
+A live list of new Pons coins using the name or ticker of a coin that already graduated, with both addresses side by side and a ready-to-post warning.
+
+We use graduation, not volume. Volume here is easy to fake.
+
+REPLY:
+The live list: https://blamethestock.com/#alerts

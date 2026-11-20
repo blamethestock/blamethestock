@@ -450,6 +450,75 @@ async function copiesBody(rawQuery, deps, hint = null) {
 }
 
 // =============================================================================================================
+// GET /v1/alerts: Pons launches of the last 24 h that use the name or ticker of a coin that already graduated
+// =============================================================================================================
+// Reference = graduated Pons coins (graduating takes real buys up to the curve's threshold, unlike volume numbers,
+// which are easy to fake here). Facts only: never "real", never "scam". Skeletons ignore hidden characters and
+// look-alike letters; very short names (under 3 characters) are left out because they collide by chance.
+export const ALERT_HOURS = 24;
+export const ALERT_LIMIT = 40;
+const ALERT_SECONDS = 120;
+export const ALERT_BLOCKS = Math.round((ALERT_HOURS * 3600) / 0.1045);   // ~24 h of Robinhood Chain blocks
+export const SQL_ALERTS = `
+WITH recent AS (
+  SELECT token, symbol, name, time, block, creator, tx_from, tx, sym_skel, name_skel FROM launches
+  WHERE block >= (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'last_block') - ?1
+),
+hits AS (
+  SELECT r.token AS c, g.token AS o, g.block AS gb, 'ticker' AS kind FROM recent r
+    JOIN graduations g ON g.sym_skel = r.sym_skel
+    WHERE length(r.sym_skel) >= 3 AND g.token <> r.token AND g.block < r.block
+  UNION ALL
+  SELECT r.token, g.token, g.block, 'name' FROM recent r
+    JOIN graduations g ON g.name_skel = r.name_skel
+    WHERE length(r.name_skel) >= 3 AND g.token <> r.token AND g.block < r.block
+)
+SELECT r.token, r.symbol, r.name, r.time, r.block, r.creator, r.tx_from, r.tx,
+       g.token AS o_token, g.symbol AS o_symbol, g.name AS o_name, g.block AS o_grad_block, g.tx AS o_grad_tx,
+       h.kind AS kind, (SELECT COUNT(DISTINCT h2.o) FROM hits h2 WHERE h2.c = h.c) AS o_count
+FROM hits h
+JOIN recent r ON r.token = h.c
+JOIN graduations g ON g.token = h.o
+WHERE h.gb = (SELECT MIN(h3.gb) FROM hits h3 WHERE h3.c = h.c)
+ORDER BY r.block DESC
+LIMIT ?2`;
+
+export function alertsFromRows(rows, nowSec) {
+  const seen = new Set();
+  const out = [];
+  for (const x of rows || []) {
+    if (!x || !isAddr(x.token) || !isAddr(x.o_token) || seen.has(x.token)) continue;
+    seen.add(x.token);
+    out.push({
+      copy: { address: x.token, symbol: x.symbol ?? null, name: x.name ?? null, time: x.time == null ? null : Number(x.time),
+        ageSeconds: x.time == null ? null : Math.max(0, nowSec - Number(x.time)), dev: isAddr(x.tx_from) ? x.tx_from : x.creator, tx: x.tx },
+      graduated: { address: x.o_token, symbol: x.o_symbol ?? null, name: x.o_name ?? null, graduationBlock: Number(x.o_grad_block), graduationTx: x.o_grad_tx },
+      matchedOn: x.kind === 'name' ? 'name' : 'ticker',
+      graduatedSameName: Number(x.o_count) || 1,
+    });
+  }
+  return out;
+}
+
+async function alertsBody(deps) {
+  if (!deps.db) return fail('unavailable', 'Copycat alerts are unavailable right now.');
+  const nowSec = Math.floor(deps.now / 1000);
+  const hit = await cacheGet(deps, 'alerts');
+  if (hit) return { status: 200, body: hit, cacheSeconds: ALERT_SECONDS };
+  try {
+    const res = await deps.db.prepare(SQL_ALERTS).bind(ALERT_BLOCKS, ALERT_LIMIT * 3).all();
+    const alerts = alertsFromRows(res && res.results, nowSec).slice(0, ALERT_LIMIT);
+    const body = { ok: true, hours: ALERT_HOURS, asOf: new Date(deps.now).toISOString(), alerts,
+      about: 'Pons launches of the last 24 hours using the name or ticker of a Pons coin that already graduated. '
+        + 'Same name is a fact, not proof of a scam; a graduated coin is not proof of the original either.' };
+    await cachePut(deps, 'alerts', body, ALERT_SECONDS);
+    return { status: 200, body, cacheSeconds: ALERT_SECONDS };
+  } catch (e) {
+    return fail('unavailable', 'Copycat alerts are unavailable right now.');
+  }
+}
+
+// =============================================================================================================
 // GET /v1/report/{token} and /v1/report/{token}/links
 // =============================================================================================================
 const REPORT_NOTE = 'The launch report (dev moves, first buyers, fees, bridges, activity) is read from Robinhood Chain '
@@ -501,7 +570,7 @@ function linksBody(rawToken) {
 // =============================================================================================================
 // The router
 // =============================================================================================================
-const RATE_LIMITED = (path) => path === '/mcp' || path === '/v1/count' || path.startsWith('/v1/copies') || path.startsWith('/v1/report');
+const RATE_LIMITED = (path) => path === '/mcp' || path === '/v1/alerts' || path === '/v1/count' || path.startsWith('/v1/copies') || path.startsWith('/v1/report');
 
 // ---- the blame counter ----------------------------------------------------------------------------------------
 // POST /v1/count: the site sends one after each blame card it draws (no body; nothing about the visitor is kept,
@@ -570,7 +639,7 @@ async function handle(request, env, ctx, deps) {
     return jsonAnswer(200, {
       ok: true, service: 'bts-api', version: VERSION,
       about: 'Read-only facts about Robinhood Chain coins. Not financial advice. The launch index is served here; chain facts are read by the website in your browser.',
-      endpoints: ['/v1/health', '/v1/stats', '/v1/copies?q=TICKER|0xADDRESS', '/v1/report/0xTOKEN', '/v1/report/0xTOKEN/links', '/mcp'],
+      endpoints: ['/v1/health', '/v1/stats', '/v1/alerts', '/v1/copies?q=TICKER|0xADDRESS', '/v1/report/0xTOKEN', '/v1/report/0xTOKEN/links', '/mcp'],
       site: 'https://blamethestock.com',
     }, { cacheSeconds: 300, headers: cors });
   }
@@ -582,6 +651,7 @@ async function handle(request, env, ctx, deps) {
     const r = await statsBody(deps);
     return jsonAnswer(r.status, r.body, { cacheSeconds: r.status === 200 ? r.cacheSeconds : 0, headers: cors });
   }
+  if (path === '/v1/alerts') return out(await alertsBody(deps));
   if (path === '/v1/copies') {
     const p = url.params;
     const hint = p.has('name') || p.has('symbol') ? { name: p.get('name'), symbol: p.get('symbol') } : null;
