@@ -1,6 +1,6 @@
 {
  "summary": {
-  "at": "2026-11-20T16:50:51.930Z",
+  "at": "2026-11-20T17:06:41.928Z",
   "total": 265,
   "passed": 265
  },
@@ -850,7 +850,7 @@
    "item": "posts/receipts-1080x1080.png",
    "check": "under 5 MB",
    "pass": true,
-   "detail": "91 KB"
+   "detail": "104 KB"
   },
   {
    "group": "Post images",
@@ -906,7 +906,7 @@
    "item": "posts/receipts-1200x675.png",
    "check": "under 5 MB",
    "pass": true,
-   "detail": "82 KB"
+   "detail": "94 KB"
   },
   {
    "group": "Post images",

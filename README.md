@@ -48,6 +48,7 @@ DexScreener and GeckoTerminal are only used to find which pool a coin trades in.
 - **Fixed supply**, launched on Pons.
 - **Dev buy: 1.59% of supply** at launch (0.028 ETH, [launch tx](https://robinhoodchain.blockscout.com/tx/0x2ebfad04a4ed91e0be1dcf3f43e41bc1effd2b8062e6133af03e3a9efbb48277)). Dev wallet: [`0xfbA600991E6d76a17e45Fec9F68b002c97def19D`](https://robinhoodchain.blockscout.com/address/0xfbA600991E6d76a17e45Fec9F68b002c97def19D).
 - **The dev never sells.**
+- **Burned:** the dev burned 7,954,731.84 $BLAME (half the dev buy, 0.80% of supply) on Nov 20 ([burn tx](https://robinhoodchain.blockscout.com/tx/0x6c5cc29292ed99ca16bbf6d48efc4ee7112cffed92e2e2383bde3408720a5818)). The dev now holds 0.80% of supply and has sold nothing.
 - **Creator fees buy back and burn $BLAME.**
 - **Receipts posted.** Once the dev wallet is set, the site's Receipts section reads it live from the chain: the dev buy, every sell, burn and fee claim, each linked to its transaction. You don't have to trust us; check the wallet.
 

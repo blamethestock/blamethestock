@@ -6,6 +6,8 @@
     "devWallet": "0xfbA600991E6d76a17e45Fec9F68b002c97def19D",
     "devBuy": "1.59% of supply (0.028 ETH)",
     "devSold": "0%",
-    "holding": "1.59% of supply"
+    "holding": "0.80% of supply",
+    "burned": "0.80% of supply (7.95M, half the dev buy)",
+    "burnTx": "0x6c5cc29292ed99ca16bbf6d48efc4ee7112cffed92e2e2383bde3408720a5818"
   }
 }
