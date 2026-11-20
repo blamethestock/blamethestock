@@ -41,12 +41,12 @@ DexScreener and GeckoTerminal are only used to find which pool a coin trades in.
 | Launch report with wallet links | **Live** |
 | MCP server, hosted at `https://api.blamethestock.com/mcp` (tools: `blame_split`, `check_copycats`, `launch_report`) | **Live** |
 | MCP npm package (`npx blamethestock-mcp`) and directory listings | Planned |
-| $BLAME receipts on the site (dev buy, sells, burns, fee claims, live from the chain) | Built, switches on at launch |
+| $BLAME receipts on the site (dev buy, sells, burns, fee claims, live from the chain) | **Live** |
 
 ## $BLAME
 
 - **Fixed supply**, launched on Pons.
-- **Dev buy about 1.5%** of supply at launch.
+- **Dev buy: 1.59% of supply** at launch (0.028 ETH, [launch tx](https://robinhoodchain.blockscout.com/tx/0x2ebfad04a4ed91e0be1dcf3f43e41bc1effd2b8062e6133af03e3a9efbb48277)). Dev wallet: [`0xfbA600991E6d76a17e45Fec9F68b002c97def19D`](https://robinhoodchain.blockscout.com/address/0xfbA600991E6d76a17e45Fec9F68b002c97def19D).
 - **The dev never sells.**
 - **Creator fees buy back and burn $BLAME.**
 - **Receipts posted.** Once the dev wallet is set, the site's Receipts section reads it live from the chain: the dev buy, every sell, burn and fee claim, each linked to its transaction. You don't have to trust us; check the wallet.
