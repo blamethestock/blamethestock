@@ -270,7 +270,38 @@ function rowView(m, ref, refKind, W, tz) {
     ],
     flags,
     time: secs(launch.time),
+    stats: { sym: text(m.symbol, 20).replace(/^\$/, ''), holders, usd: pending || !m.liquidity ? null : num(m.liquidity.usd), graduated: g ? true : gradKnown && !pending ? false : null },
   };
+}
+
+const joinWhy = (a) => (a.length <= 1 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]);
+
+// Which same-name coin leads on the facts: most holders, graduated, most money in it. A coin is marked only when it
+// clearly leads on at least two of the three (strictly more holders, strictly more money, graduated while others are not)
+// and every coin's facts are in. Never "real", never "official": $BLAME's own badge is the only official one.
+export function pickLeader(rows) {
+  const rs = rows.filter((r) => r && r.stats);
+  if (rs.length < 2 || rs.some((r) => r.pending || r.stats.holders == null || r.stats.graduated == null)) return null;
+  const best = (key) => {
+    const vals = rs.map((r) => r.stats[key]).filter((v) => v != null);
+    if (vals.length !== rs.length) return null;
+    const top = Math.max(...vals);
+    const at = rs.filter((r) => r.stats[key] === top);
+    return at.length === 1 && top > 0 ? at[0] : null;
+  };
+  const byHolders = best('holders');
+  const byMoney = best('usd');
+  const grads = rs.filter((r) => r.stats.graduated);
+  const byGrad = grads.length === 1 ? grads[0] : null;
+  for (const cand of [byHolders, byMoney, byGrad]) {
+    if (!cand) continue;
+    const why = [];
+    if (cand === byHolders) why.push('holders');
+    if (cand === byGrad) why.push('graduated');
+    if (cand === byMoney) why.push('money');
+    if (why.length >= 2) return { row: cand, why };
+  }
+  return null;
 }
 
 export function copyView(result, settings = SETTINGS, { timeZone } = {}) {
@@ -282,6 +313,12 @@ export function copyView(result, settings = SETTINGS, { timeZone } = {}) {
   const refKind = queryRow ? 'Yours' : 'Official';
   const rows = all.map((m) => rowView(m, ref, refKind, W, timeZone))
     .sort((a, b) => (a.time == null ? Infinity : a.time) - (b.time == null ? Infinity : b.time));
+  const lead = officialRow ? null : pickLeader(rows);
+  if (lead) {
+    lead.row.isLead = true;
+    lead.row.quiet = false;
+    lead.row.tags.push(W.leadTag || 'Leads on the facts');
+  }
   const quiet = rows.filter((r) => r.quiet);
   const o = result.official && isAddr(result.official.address) ? result.official : null;
   const sym = o ? '$' + text(String(o.symbol || '').replace(/^\$/, ''), 20) : '';
@@ -297,6 +334,14 @@ export function copyView(result, settings = SETTINGS, { timeZone } = {}) {
       ? shortAddr(result.query.address)
       : '$' + text(String((result.query && result.query.input) || '').replace(/^\$/, ''), 32),
     verdict: text(result.verdict),
+    lead: lead ? {
+      text: fill(W.leadLine || 'Leads on the facts: {sym} {addr} has {why}. That is not proof it is the original; check the flags below.', {
+        sym: lead.row.stats.sym ? '$' + lead.row.stats.sym : '',
+        addr: lead.row.short,
+        why: joinWhy(lead.why.map((k) => ({ holders: 'the most holders', graduated: 'graduated', money: 'the most money in it' })[k])),
+      }),
+      address: lead.row.address,
+    } : null,
     official: o ? { label: '✅ ' + fill(W.official, { symbol: sym }), address: o.address.toLowerCase(), url: tokenUrl(o.address) } : null,
     rows: rows.filter((r) => !r.quiet),
     quiet,
@@ -381,6 +426,7 @@ function rowEl(r, W) {
   const cls = ['cc-row'];
   if (r.isQuery) cls.push('is-query');
   if (r.isOfficial) cls.push('is-official');
+  if (r.isLead) cls.push('is-lead');
   if (r.warn) cls.push('is-warn');
   if (r.pending) cls.push('is-pending');
   return h('li', { class: cls.join(' '), 'data-address': r.address },
@@ -451,6 +497,7 @@ export function renderCopies(el, res, settings = SETTINGS, { timeZone } = {}) {
     h('p', { class: 'cc-verdict', text: view.verdict }),
     view.reading ? null : h('p', { class: 'cc-share-row' }, ext(copiesShare(res, settings), { class: 'cc-tool cc-share', 'aria-label': 'Share to X (opens in a new tab)' }, 'Share to X', h('span', { 'aria-hidden': 'true', text: ' ↗' }))),
     view.reading ? h('p', { class: 'bts-progress cc-progress cc-reading', role: 'status', text: view.reading }) : null,
+    view.lead ? h('p', { class: 'cc-lead', text: view.lead.text }) : null,
     view.official ? h('div', { class: 'cc-official' },
       h('span', { class: 'cc-badge', text: view.official.label }),
       addrTools(view.official.address, W, { full: true })) : null,

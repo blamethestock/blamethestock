@@ -1,0 +1,7 @@
+POST:
+Shipped: a sharper copy check on blamethestock.com
+
+Paste a ticker. It lists every Pons coin with that name, marks the one that leads on holders, graduation and money in it, and flags copies that launched just before, dumped fast or took fees and left.
+
+REPLY:
+Example, 5 coins named OBSYN: https://blamethestock.com/?q=OBSYN

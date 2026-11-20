@@ -234,3 +234,5 @@ a.cc-symbol:hover { text-decoration: underline; text-underline-offset: 4px; }
 /* Share to X under the verdict (copy check, launch report) */
 .cc-share-row { margin: 10px 0 0; }
 .cc-share { text-decoration: none; }
+.cc-lead { margin: 10px 0 0; padding: 10px 14px; border: 1px solid var(--bts-line-strong, #3a3a3a); border-radius: 12px; font-weight: 600; }
+.cc-row.is-lead .cc-tag:last-of-type { border-color: var(--bts-fg, #fff); }

@@ -2,7 +2,7 @@
 // (fetchCopies with a fake fetch), the ticker test in app.js, and the settings/page/safety-rule wiring.
 // The OBSYN results are the real copy check replayed offline (dev/tests/fixtures/obsyn).
 import { suite, test, eq, ok } from './harness.js';
-import { copyView, fetchCopies, checkAnswer, errorText, relative, when, words, shortAddr, loadCopies, apiBaseOf } from '../../site/src/ui/copycheck-card.js';
+import { pickLeader, copyView, fetchCopies, checkAnswer, errorText, relative, when, words, shortAddr, loadCopies, apiBaseOf } from '../../site/src/ui/copycheck-card.js';
 import { tickerOf, devApi, viewOf } from '../../site/src/app.js';
 import { SETTINGS, applyContractAddress } from '../../site/settings.js';
 import { TRUST_DEFAULTS, trustSettings, CAVEATS } from '../../site/src/trust/rules.js';
@@ -370,4 +370,16 @@ test('Share to X: report and copy check open X with the coin and a link back to 
   ok(byTicker.text.length <= 200, 'long verdicts are cut to fit one post');
   eq(intent(reportShare({ token: { symbol: '<b>X</b>' }, verdict: 'v' })).text, 'Launch report: v', 'odd symbols are left out');
   eq(viewLink({ address: 'nope' }), 'https://blamethestock.com/');
+});
+
+test('copy check: the coin that clearly leads on holders, graduation and money is labelled, never as "real" or "official"', () => {
+  const row = (holders, usd, graduated, extra = {}) => ({ stats: { sym: 'X', holders, usd, graduated }, ...extra });
+  const a = row(900, 50000, true), b = row(12, 300, false), c = row(4, 0.5, false);
+  eq(pickLeader([a, b, c]).why, ['holders', 'graduated', 'money']);
+  eq(pickLeader([a, b, c]).row, a);
+  eq(pickLeader([row(900, 10, false), row(12, 300, false)]), null, 'one win out of three is not enough');
+  eq(pickLeader([row(900, 50000, true), row(900, 300, false)]).why, ['graduated', 'money'], 'a tie on holders still leaves two clear wins');
+  eq(pickLeader([a, row(null, 1, false)]), null, 'a coin with unread facts: no label');
+  eq(pickLeader([a, row(1, 1, false, { pending: true })]), null, 'still reading: no label');
+  eq(pickLeader([a]), null, 'one coin: nothing to compare');
 });
