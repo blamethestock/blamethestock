@@ -8,6 +8,7 @@ import { SETTINGS, applyContractAddress } from '../../site/settings.js';
 import { TRUST_DEFAULTS, trustSettings, CAVEATS } from '../../site/src/trust/rules.js';
 import { loadFixture, runScenario, replayFetch, fixtureIndex, OBSYN } from './fixtures/obsyn/replay.js';
 import { copyMatches } from '../../api/src/copies.js';
+import { reportShare, copiesShare, viewLink } from '../../site/src/ui/x-share.js';
 import { _setTransport } from '../../site/src/data/rpc.js';
 
 suite('copy check › card');
@@ -348,3 +349,25 @@ test('the footer GitHub link: settings name a public owner/repo and the page has
   ok(/id="footer-github"[^>]*rel="noopener noreferrer"[^>]*hidden/.test(html), 'footer link opens safely and starts hidden');
 });
 
+
+// jsc has no URL(): read the query by hand.
+function intent(u) {
+  const [base, q] = u.split('?');
+  const out = { base };
+  for (const kv of q.split('&')) { const [k, v] = kv.split('='); out[k] = decodeURIComponent(v); }
+  return out;
+}
+test('Share to X: report and copy check open X with the coin and a link back to the same view', () => {
+  const rep = intent(reportShare({ token: { symbol: 'OBSYN', address: OBSYN.real }, verdict: 'Dev sold nothing.' }));
+  eq(rep.base, 'https://x.com/intent/post');
+  eq(rep.text, 'Launch report for $OBSYN: Dev sold nothing.');
+  eq(rep.url, 'https://blamethestock.com/?ca=' + OBSYN.real + '&view=report');
+  const byAddr = intent(copiesShare({ query: { kind: 'address', address: OBSYN.copy, input: OBSYN.copy }, matches: [{ isQuery: true, symbol: 'OBSYN' }], verdict: '3 other coins use this name.' }));
+  eq(byAddr.text, 'Is this the real $OBSYN? 3 other coins use this name.');
+  eq(byAddr.url, 'https://blamethestock.com/?ca=' + OBSYN.copy + '&view=copies');
+  const byTicker = intent(copiesShare({ query: { kind: 'ticker', input: '$BLAME' }, matches: [], verdict: 'x '.repeat(200) }));
+  eq(byTicker.url, 'https://blamethestock.com/?q=BLAME');
+  ok(byTicker.text.length <= 200, 'long verdicts are cut to fit one post');
+  eq(intent(reportShare({ token: { symbol: '<b>X</b>' }, verdict: 'v' })).text, 'Launch report: v', 'odd symbols are left out');
+  eq(viewLink({ address: 'nope' }), 'https://blamethestock.com/');
+});

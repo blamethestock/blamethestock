@@ -332,7 +332,8 @@ test('drawn card: verdict big, Dev / First buyers / Activity / Wallet links bloc
     const as = c.querySelectorAll('a');
     ok(as.length > 30, String(as.length));
     for (const a of as) {
-      ok(PROOF.test(a.getAttribute('href')), a.getAttribute('href'));
+      const share = /^https:\/\/x\.com\/intent\/post\?/.test(a.getAttribute('href'));   // the Share to X link
+      ok(share ? /^https:\/\/x\.com\/intent\/post\?/.test(a.getAttribute('href')) : PROOF.test(a.getAttribute('href')), a.getAttribute('href'));
       eq([a.getAttribute('target'), a.getAttribute('rel')], ['_blank', 'noopener noreferrer']);
     }
     renderLinks(c, links, again, SETTINGS, NY);
@@ -357,7 +358,10 @@ test('drawn card: text from the API stays text; a bad link is not drawn as a lin
     const c = renderReport(mount, evil, SETTINGS, NY);
     eq(c.querySelector('.rc-verdict').textContent, '<img src=x onerror=alert(1)>');
     eq(c.querySelector('.cc-query').textContent, '$<b>X</b> · 0x7a2a…475e');
-    for (const a of c.querySelectorAll('a')) ok(PROOF.test(a.getAttribute('href')), a.getAttribute('href'));
+    for (const a of c.querySelectorAll('a')) {
+      if (/^https:\/\/x\.com\/intent\/post\?/.test(a.getAttribute('href'))) continue;   // the Share to X link
+      ok(PROOF.test(a.getAttribute('href')), a.getAttribute('href'));
+    }
     const sell = c.querySelectorAll('.rc-step')[1];
     eq(sell.querySelectorAll('a').length, 0, 'the sell step has no link now');
   });

@@ -16,6 +16,7 @@ import { SETTINGS } from '../../settings.js';
 import { fill, usd } from '../core/format.js';
 import { duration, markSegments } from '../trust/rules.js';
 import { runCopyCheck } from '../trust/copycheck.js';
+import { copiesShare } from './x-share.js';
 
 export const EXPLORER = 'https://robinhoodchain.blockscout.com';
 const ADDR = /^0x[0-9a-fA-F]{40}$/;
@@ -448,6 +449,7 @@ export function renderCopies(el, res, settings = SETTINGS, { timeZone } = {}) {
   const c = card(view.reading ? 'reading' : 'result',
     head(view),
     h('p', { class: 'cc-verdict', text: view.verdict }),
+    view.reading ? null : h('p', { class: 'cc-share-row' }, ext(copiesShare(res, settings), { class: 'cc-tool cc-share', 'aria-label': 'Share to X (opens in a new tab)' }, 'Share to X', h('span', { 'aria-hidden': 'true', text: ' ↗' }))),
     view.reading ? h('p', { class: 'bts-progress cc-progress cc-reading', role: 'status', text: view.reading }) : null,
     view.official ? h('div', { class: 'cc-official' },
       h('span', { class: 'cc-badge', text: view.official.label }),

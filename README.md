@@ -64,6 +64,7 @@ python3 dev/tools/recompute_split.py 0x2e8c31162b855a2ffa90f6f8634643ad6f111e18 
 | Blame split with proof links | **Live** |
 | Fake-copy warning | **Live** |
 | Launch report with wallet links | **Live** |
+| Share to X on every result (blame split, copy check, launch report) | **Live** |
 | MCP server, hosted at `https://api.blamethestock.com/mcp` (tools: `blame_split`, `check_copycats`, `launch_report`) | **Live** |
 | MCP npm package (`npx blamethestock-mcp`) and directory listings | Planned |
 | $BLAME receipts on the site (dev buy, sells, burns, fee claims, live from the chain) | **Live** |

@@ -5,7 +5,7 @@ import { xIntentUrl, copyLink, saveImage, prepareShareImage } from './share.js';
 
 // Button and label words on the card. The sentences themselves come from settings.js (wording).
 const LABELS = {
-  post: 'Post on X',
+  post: 'Share to X',
   newTab: ' (opens in a new tab)',
   save: 'Save image',
   saving: 'Saving…',

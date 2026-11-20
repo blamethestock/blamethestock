@@ -22,6 +22,7 @@ import { duration, ethAmount } from '../trust/rules.js';
 import { buildVerdict, linkSentence } from '../trust/report-rules.js';
 import { tokenUrl, addressUrl, txUrl, shortAddr, when, apiBaseOf } from './copycheck-card.js';
 import { buildReportLocal, buildLinksLocal } from '../trust/local.js';
+import { reportShare } from './x-share.js';
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/;
 const HASH = /^0x[0-9a-fA-F]{64}$/;
@@ -745,6 +746,7 @@ export function renderReport(el, res, settings = SETTINGS, { onRetry = null, tim
     v.official ? h('div', { class: 'cc-official rc-official' }, h('span', { class: 'cc-badge', text: v.official.label }),
       ext(v.tokenUrl, { class: 'cc-tool', 'aria-label': W.explorer + ' (opens in a new tab)' }, W.explorer, h('span', { 'aria-hidden': 'true', text: ' ↗' }))) : null,
     h('p', { class: 'cc-verdict rc-verdict', text: v.verdict }),
+    h('p', { class: 'cc-share-row' }, ext(reportShare(res, settings), { class: 'cc-tool cc-share', 'aria-label': 'Share to X (opens in a new tab)' }, 'Share to X', h('span', { 'aria-hidden': 'true', text: ' ↗' }))),
     h('div', { class: 'rc-grid' },
       devEl(v.dev, W),
       sniperEl(v.snipers, W),

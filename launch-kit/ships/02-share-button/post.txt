@@ -1,0 +1,7 @@
+POST:
+Shipped: a Share to X button on every result on blamethestock.com
+
+Blame split, copy check and launch report. One tap posts the coin, the finding and a link that reopens the same view, so anyone can check it.
+
+REPLY:
+Try it on $BLAME's launch report: https://blamethestock.com/?ca=0xc15402eadae17fe62ac6bb6c135451a5584b2e82&view=report

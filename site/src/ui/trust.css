@@ -230,3 +230,7 @@ a.cc-symbol:hover { text-decoration: underline; text-underline-offset: 4px; }
 #receipts { padding-top: clamp(32px, 5vw, 56px); }
 #receipts .rc-receipts-intro { margin: 10px 0 18px; color: var(--bts-grey); font-size: 15px; line-height: 1.5; }
 
+
+/* Share to X under the verdict (copy check, launch report) */
+.cc-share-row { margin: 10px 0 0; }
+.cc-share { text-decoration: none; }

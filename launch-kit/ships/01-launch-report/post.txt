@@ -1,0 +1,9 @@
+POST:
+Shipped: launch reports on blamethestock.com
+
+Paste any Pons coin and see what the dev did (buy %, sells, burns, fee claims), who bought in the first seconds and whether they sold, and if it graduated.
+
+Every number links to Blockscout.
+
+REPLY:
+Here's $BLAME's own report, receipts included: https://blamethestock.com/?ca=0xc15402eadae17fe62ac6bb6c135451a5584b2e82&view=report
