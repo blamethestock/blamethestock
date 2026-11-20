@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$BLAME Launch Kit</title>
+<style>
+@font-face { font-family: 'Archivo'; src: url('video/public/fonts/archivo-wdth.woff2') format('woff2'); font-weight: 100 900; font-stretch: 62% 125%; }
+:root { --bg: #000; --fg: #fff; --grey: #8b8b8b; --line: #262626; --card: #0d0d0d; --stock: #2433FF; --coin: #FF4F1F; --pass: #3ddc84; --fail: #ff4f1f; --x-bg: #000; --x-line: #2f3336; --x-grey: #71767b; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font-family: 'Archivo', system-ui, sans-serif; font-stretch: 100%; -webkit-font-smoothing: antialiased; }
+a { color: inherit; }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 48px 16px 120px; }
+.big { font-weight: 900; font-stretch: 62%; letter-spacing: -0.018em; text-transform: uppercase; line-height: .86; margin: 0; }
+h1.big { font-size: clamp(56px, 11vw, 150px); }
+h2.big { font-size: clamp(40px, 6vw, 76px); margin: 88px 0 10px; }
+h3 { font-size: 18px; margin: 28px 0 10px; font-weight: 700; }
+p, li { color: #cfcfcf; font-size: 17px; line-height: 1.55; max-width: 780px; }
+.muted { color: var(--grey); }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+pre { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; overflow-x: auto; color: #e8e8e8; }
+.pill { display: inline-block; padding: 6px 12px; border-radius: 999px; font-weight: 700; font-size: 14px; }
+.ok { background: var(--pass); color: #000; } .no { background: var(--fail); color: #000; }
+.grid { display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 14px; }
+.tile img, .tile video { width: 100%; display: block; border-radius: 10px; }
+.tile .cap { font-size: 14px; color: var(--grey); margin-top: 10px; word-break: break-all; }
+.row { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-end; }
+.toggle { display: inline-flex; gap: 8px; align-items: center; font-size: 15px; color: #cfcfcf; cursor: pointer; margin: 6px 0 14px; }
+nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 26px 0 0; }
+nav a { text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: 14px; }
+nav a:hover { border-color: #555; }
+
+/* circle crops */
+.circ { border-radius: 50%; display: block; outline: 1px dashed #444; outline-offset: 4px; }
+.circ-wrap { text-align: center; font-size: 14px; color: var(--grey); }
+.circ-wrap span { display: block; margin-top: 10px; }
+
+/* X profile mock */
+.xprof { background: var(--x-bg); border: 1px solid var(--x-line); border-radius: 16px; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
+.xprof .ban { position: relative; width: 100%; aspect-ratio: 3 / 1; background: #111; }
+.xprof .ban img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.xprof .av { position: absolute; border-radius: 50%; border: 4px solid var(--x-bg); background: #000; overflow: hidden; }
+.xprof .av img { width: 100%; height: 100%; display: block; }
+.xprof .body { padding: 12px 16px 18px; }
+.xprof .nm { font-weight: 800; font-size: 20px; margin-top: 2px; }
+.xprof .hd { color: var(--x-grey); font-size: 15px; }
+.xprof .bio { font-size: 15px; margin-top: 10px; line-height: 1.35; color: #e7e9ea; }
+.xprof .site { color: #1d9bf0; font-size: 15px; margin-top: 8px; }
+.zone { position: absolute; background: rgba(255, 0, 80, .35); border: 1px dashed #ff2d6f; display: none; pointer-events: none; }
+.show-zones .zone { display: block; }
+
+/* X feed mock */
+.feeds { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+.feed { background: var(--x-bg); border: 1px solid var(--x-line); border-radius: 0; font-family: system-ui, -apple-system, sans-serif; }
+.feed.desk { width: 600px; max-width: 100%; }
+.feed.phone { width: 390px; max-width: 100%; border-radius: 28px; overflow: hidden; }
+.feed .lab { font-size: 12px; color: var(--x-grey); padding: 8px 16px; border-bottom: 1px solid var(--x-line); font-family: 'Archivo', sans-serif; }
+.tw { display: flex; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--x-line); }
+.tw .a { width: 40px; height: 40px; border-radius: 50%; flex: none; }
+.tw .c { flex: 1; min-width: 0; }
+.tw .n { font-size: 15px; } .tw .n b { color: #e7e9ea; } .tw .n span { color: var(--x-grey); }
+.tw .t { font-size: 15px; color: #e7e9ea; margin: 2px 0 10px; line-height: 1.3; white-space: pre-line; }
+.tw .m { width: 100%; border-radius: 16px; border: 1px solid var(--x-line); display: block; }
+.tw .actions { display: flex; justify-content: space-between; color: var(--x-grey); font-size: 13px; margin-top: 10px; max-width: 420px; }
+.linkcard { position: relative; border: 1px solid var(--x-line); border-radius: 16px; overflow: hidden; }
+.linkcard img { width: 100%; display: block; }
+.linkcard .dom { position: absolute; left: 12px; bottom: 12px; background: rgba(0,0,0,.77); color: #fff; font-size: 13px; padding: 2px 6px; border-radius: 4px; }
+.from { font-size: 13px; color: var(--x-grey); margin-top: 6px; }
+
+/* checks */
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--grey); font-weight: 600; position: sticky; top: 0; background: var(--bg); }
+td.r { font-weight: 800; } td.r.p { color: var(--pass); } td.r.f { color: var(--fail); }
+td.d { color: var(--grey); word-break: break-word; }
+.tablewrap { max-height: 720px; overflow: auto; border: 1px solid var(--line); border-radius: 14px; }
+.filter { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 14px; }
+.filter button { background: transparent; color: var(--fg); border: 1px solid var(--line); border-radius: 999px; padding: 7px 13px; font: inherit; font-size: 14px; cursor: pointer; }
+.filter button[aria-pressed="true"] { background: var(--fg); color: #000; }
+ol.todo li { margin: 8px 0; }
+@media (max-width: 640px) { .feed.desk { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 class="big">$BLAME<br>Launch kit</h1>
+  <p class="muted" id="summary">Loading check results…</p>
+  <nav>
+    <a href="#logo">Logo</a><a href="#profile">X profile</a><a href="#feed">Feed previews</a><a href="#og">Link preview</a>
+    <a href="#video">Video</a><a href="#files">All files</a><a href="#checks">Checks</a><a href="#commands">Commands</a><a href="#todo">Your to-do</a>
+  </nav>
+
+  <!-- ============================== LOGO -->
+  <h2 class="big" id="logo">1. Logo</h2>
+  <p>Three original marks. <b>B (B-arrow) is recommended</b> and used across the kit: it reads as a letter even at 32 px, it works in pure black and white, and the orange arrow is the only accent. To switch, change <code>"logo"</code> in <code>config.json</code> to <code>"A"</code> or <code>"C"</code> and run <code>npm run kit</code>.</p>
+  <div class="tile"><img src="logo/logo-options-1920x1080.png" alt="The three logo options side by side"></div>
+
+  <h3>Profile picture, cropped to a circle like X does</h3>
+  <div class="row">
+    <div class="circ-wrap"><img class="circ" src="logo/pfp-400x400.png" width="400" height="400" alt="Profile picture at 400 px" style="max-width:100%;height:auto"><span>400 px</span></div>
+    <div class="circ-wrap"><img class="circ" src="logo/pfp-400x400.png" width="48" height="48" alt="Profile picture at 48 px"><span>48 px (feed)</span></div>
+    <div class="circ-wrap"><img class="circ" src="logo/pfp-400x400.png" width="32" height="32" alt="Profile picture at 32 px"><span>32 px (replies)</span></div>
+    <div class="circ-wrap"><img class="circ" src="logo/logo-1000x1000.png" width="140" height="140" alt="Pons token image in a circle"><span>Pons token image</span></div>
+    <div class="circ-wrap"><img src="logo/favicon-32.png" width="32" height="32" alt="Favicon"><span>favicon 32</span></div>
+    <div class="circ-wrap"><img src="logo/apple-touch-icon-180.png" width="90" height="90" style="border-radius:20px" alt="iPhone icon"><span>iPhone icon</span></div>
+  </div>
+  <h3>Wordmark</h3>
+  <div class="tile" style="max-width:640px"><img src="logo/logo-wordmark.svg" alt="Logo with BLAME wordmark"></div>
+
+  <!-- ============================== PROFILE -->
+  <h2 class="big" id="profile">2. X profile</h2>
+  <p>Your banner and profile picture as X shows them. Turn on the overlay to see the areas X covers: the profile picture (lower-left) and the strips phones trim (top and bottom). Nothing important sits in the pink areas.</p>
+  <label class="toggle"><input type="checkbox" id="zones" checked> Show the covered areas</label>
+  <div class="feeds show-zones" id="profiles">
+    <div style="width:600px;max-width:100%">
+      <div class="lab muted" style="font-size:13px;margin-bottom:6px">Desktop (600 px column)</div>
+      <div class="xprof">
+        <div class="ban"><img src="x/banner-1500x500.png" alt="Banner">
+          <div class="zone" style="left:0;top:60%;width:28.7%;height:40%"></div>
+          <div class="zone" style="left:0;top:0;width:100%;height:14%"></div>
+          <div class="zone" style="left:0;bottom:0;width:100%;height:14%"></div>
+          <div class="av" style="left:16px;bottom:-67px;width:134px;height:134px"><img src="logo/pfp-400x400.png" alt=""></div>
+        </div>
+        <div class="body" style="padding-top:76px">
+          <div class="nm">Blame the Stock</div><div class="hd">@yourhandle</div>
+          <div class="bio" id="bio1"></div><div class="site">🔗 blamethestock.com</div>
+        </div>
+      </div>
+    </div>
+    <div style="width:390px;max-width:100%">
+      <div class="lab muted" style="font-size:13px;margin-bottom:6px">iPhone (390 px)</div>
+      <div class="xprof">
+        <div class="ban"><img src="x/banner-1500x500.png" alt="Banner">
+          <div class="zone" style="left:0;top:60%;width:28.7%;height:40%"></div>
+          <div class="zone" style="left:0;top:0;width:100%;height:14%"></div>
+          <div class="zone" style="left:0;bottom:0;width:100%;height:14%"></div>
+          <div class="av" style="left:12px;bottom:-40px;width:80px;height:80px"><img src="logo/pfp-400x400.png" alt=""></div>
+        </div>
+        <div class="body" style="padding-top:48px">
+          <div class="nm">Blame the Stock</div><div class="hd">@yourhandle</div>
+          <div class="bio" id="bio2"></div><div class="site">🔗 blamethestock.com</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================== FEED -->
+  <h2 class="big" id="feed">3. Feed previews</h2>
+  <p>Every post image in both sizes, the way it shows in the X feed on a desktop (600 px column) and on an iPhone (390 px). Pick a card:</p>
+  <div class="filter" id="feedpick"></div>
+  <div class="feeds" id="feeds"></div>
+
+  <!-- ============================== OG -->
+  <h2 class="big" id="og">4. Link preview</h2>
+  <p>What a post with <b>blamethestock.com</b> in it looks like once you add the tags from <code>og-meta-snippet.html</code> to the site (not done; the site is unchanged). X puts the site name in the lower-left corner, so that corner is kept empty.</p>
+  <div class="feeds">
+    <div class="feed desk"><div class="lab">Desktop</div>
+      <div class="tw"><img class="a" src="logo/pfp-400x400.png" alt=""><div class="c"><div class="n"><b>Blame the Stock</b> <span>@yourhandle · 1m</span></div>
+        <div class="t">Paste a coin. Blame the stock. blamethestock.com</div>
+        <div class="linkcard"><img src="x/og-1200x630.png" alt="Link preview"><div class="dom">blamethestock.com</div></div>
+        <div class="from">From blamethestock.com</div></div></div></div>
+    <div class="feed phone"><div class="lab">iPhone</div>
+      <div class="tw"><img class="a" src="logo/pfp-400x400.png" alt=""><div class="c"><div class="n"><b>Blame the Stock</b> <span>@yourhandle</span></div>
+        <div class="t">Paste a coin. Blame the stock. blamethestock.com</div>
+        <div class="linkcard"><img src="x/og-1200x630.png" alt="Link preview"><div class="dom">blamethestock.com</div></div></div></div></div>
+  </div>
+  <h3>Tags to add to the site yourself</h3>
+  <pre id="snippet">Open og-meta-snippet.html</pre>
+
+  <!-- ============================== VIDEO -->
+  <h2 class="big" id="video">5. Promo video</h2>
+  <p>24 seconds, 30 fps, H.264, no music. The first frame doubles as the thumbnail. There is also an optional version with soft clicks and whooshes (made from scratch, no downloaded sounds).</p>
+  <div class="grid">
+    <div class="tile"><video src="video/video-1080x1080.mp4" controls playsinline poster="video/video-1080x1080-first-frame.png"></video><div class="cap">video/video-1080x1080.mp4</div></div>
+    <div class="tile"><video src="video/video-1920x1080.mp4" controls playsinline poster="video/video-1920x1080-first-frame.png"></video><div class="cap">video/video-1920x1080.mp4</div></div>
+    <div class="tile"><video src="video/video-1920x1080-with-sound.mp4" controls playsinline poster="video/video-1920x1080-first-frame.png"></video><div class="cap">video/video-1920x1080-with-sound.mp4 (optional, soft sounds)</div></div>
+  </div>
+  <h3>One frame from each scene</h3>
+  <div class="grid" id="story"></div>
+
+  <!-- ============================== FILES -->
+  <h2 class="big" id="files">6. All images</h2>
+  <div class="grid" id="all"></div>
+
+  <!-- ============================== CHECKS -->
+  <h2 class="big" id="checks">7. Checks</h2>
+  <p id="checksum" class="muted"></p>
+  <div class="filter" id="checkfilter"></div>
+  <div class="tablewrap"><table><thead><tr><th>Result</th><th>Area</th><th>File / item</th><th>Check</th><th>Measured</th></tr></thead><tbody id="checkrows"></tbody></table></div>
+
+  <!-- ============================== COMMANDS -->
+  <h2 class="big" id="commands">8. Commands</h2>
+  <p>Open Terminal in the <code>launch-kit</code> folder first (<code>cd ~/Desktop/\$BLAME/launch-kit</code>).</p>
+  <h3>(a) Put the real contract address on everything</h3>
+  <pre>npm run kit -- --ca 0xYOUR_CONTRACT_ADDRESS</pre>
+  <h3>(b) Make a new blame card for any coin (live numbers)</h3>
+  <pre>npm run card -- 0xCOIN_ADDRESS
+npm run card -- 0xCOIN_ADDRESS 7d      (or 1h, 6h, 24h)</pre>
+  <h3>(c) Re-render only the videos</h3>
+  <pre>npm run video</pre>
+  <h3>Other</h3>
+  <pre>npm run kit -- --refresh     fetch fresh $AI / $MEME / $BONER numbers, then re-render everything
+npm run kit -- --no-video    images only (about a minute)
+npm run check                run every check again</pre>
+
+  <!-- ============================== TODO -->
+  <h2 class="big" id="todo">9. Your to-do</h2>
+  <ol class="todo">
+    <li><b>Pick the logo.</b> B is set. For A or C, change <code>"logo"</code> in <code>config.json</code>, then <code>npm run kit</code>.</li>
+    <li><b>On X:</b> upload <code>logo/pfp-400x400.png</code> as the profile picture and <code>x/banner-1500x500.png</code> as the header. Paste the name, bio and website from <code>posts.md</code>.</li>
+    <li><b>On Pons:</b> use <code>logo/logo-1000x1000.png</code> as the token image and the form text from <code>posts.md</code>.</li>
+    <li><b>After launch:</b> run <code>npm run kit -- --ca 0x…</code>, fill in the dev-wallet lines in <code>config.json</code> (<code>"receipts"</code>), run <code>npm run kit</code> again, then fill the <code>[CA]</code> and <code>[LINK]</code> slots in the posts.</li>
+    <li><b>Site (when you want):</b> copy the tags from <code>og-meta-snippet.html</code> and the icon files into the site, then upload it.</li>
+  </ol>
+</div>
+
+<script src="checks/results.js"></script>
+<script>
+(function () {
+  var BIO = "Your coin didn't pump. The stock did. Paste any Robinhood Chain coin and see how much of the move was the stock. Read-only. No wallet connect.";
+  document.getElementById('bio1').textContent = BIO;
+  document.getElementById('bio2').textContent = BIO;
+  document.getElementById('zones').addEventListener('change', function (e) {
+    document.getElementById('profiles').classList.toggle('show-zones', e.target.checked);
+  });
+
+  // ---------- feed previews
+  var CARDS = [
+    ['blame-AI', 'Nvidia reported Tuesday.\n\nWednesday, $AI fell 5.9%. 56% of that was NVDA.'],
+    ['blame-MEME', '$MEME +5.3% and AMC went the other way. That one is all the coin.'],
+    ['blame-BONER', '$BONER −12%. HIMS explains 25%. The rest is on the coin.'],
+    ['copycat-OBSYN', 'Same name. Different coin. The copy came first.'],
+    ['receipts', 'Receipts. Check them any time.'],
+  ];
+  var pick = document.getElementById('feedpick');
+  var feeds = document.getElementById('feeds');
+  function tweet(card, text, size) {
+    return '<div class="tw"><img class="a" src="logo/pfp-400x400.png" alt=""><div class="c"><div class="n"><b>Blame the Stock</b> <span>@yourhandle · 2m</span></div>' +
+      '<div class="t"></div><img class="m" src="posts/' + card + '-' + size + '.png" alt="' + card + ' ' + size + '">' +
+      '<div class="actions"><span>Reply</span><span>Repost</span><span>Like</span><span>Views</span></div></div></div>';
+  }
+  function show(i) {
+    var c = CARDS[i];
+    feeds.innerHTML = '';
+    [['desk', 'Desktop · 600 px column'], ['phone', 'iPhone · 390 px']].forEach(function (d) {
+      ['1200x675', '1080x1080'].forEach(function (size) {
+        var f = document.createElement('div');
+        f.className = 'feed ' + d[0];
+        f.innerHTML = '<div class="lab">' + d[1] + ' · ' + size + '</div>' + tweet(c[0], c[1], size);
+        f.querySelector('.t').textContent = c[1];
+        feeds.appendChild(f);
+      });
+    });
+    [].forEach.call(pick.children, function (b, j) { b.setAttribute('aria-pressed', String(j === i)); });
+  }
+  CARDS.forEach(function (c, i) {
+    var b = document.createElement('button');
+    b.textContent = c[0];
+    b.addEventListener('click', function () { show(i); });
+    pick.appendChild(b);
+  });
+  show(0);
+
+  // ---------- storyboard + all files
+  var story = document.getElementById('story');
+  ['000', '060', '165', '205', '330', '470', '575', '700'].forEach(function (f) {
+    ['1080x1080', '1920x1080'].forEach(function (s) {
+      var t = document.createElement('div'); t.className = 'tile';
+      t.innerHTML = '<img loading="lazy" src="video/storyboard/' + s + '-' + f + '.png" alt=""><div class="cap">' + s + ' · ' + (Number(f) / 30).toFixed(1) + ' s</div>';
+      story.appendChild(t);
+    });
+  });
+  var all = document.getElementById('all');
+  var FILES = ['logo/logo-1000x1000.png', 'logo/pfp-400x400.png', 'x/banner-1500x500.png', 'x/og-1200x630.png'];
+  ['blame-AI', 'blame-MEME', 'blame-BONER', 'copycat-OBSYN', 'receipts'].forEach(function (n) { FILES.push('posts/' + n + '-1200x675.png', 'posts/' + n + '-1080x1080.png'); });
+  FILES.forEach(function (f) {
+    var t = document.createElement('div'); t.className = 'tile';
+    t.innerHTML = '<a href="' + f + '"><img loading="lazy" src="' + f + '" alt=""></a><div class="cap">' + f + '</div>';
+    all.appendChild(t);
+  });
+
+  // ---------- og snippet (shown as text)
+  document.getElementById('snippet').textContent = window.SNIPPET || 'Open og-meta-snippet.html in a text editor to copy the tags.';
+
+  // ---------- checks
+  var C = window.CHECKS;
+  var sum = document.getElementById('summary'), cs = document.getElementById('checksum');
+  if (!C) { sum.textContent = 'No check results yet. Run: npm run check'; return; }
+  var allPass = C.summary.passed === C.summary.total;
+  var badge = '<span class="pill ' + (allPass ? 'ok' : 'no') + '">' + C.summary.passed + ' / ' + C.summary.total + ' checks passed</span>';
+  sum.innerHTML = badge + ' &nbsp;Last checked ' + new Date(C.summary.at).toLocaleString();
+  cs.innerHTML = badge;
+  var rows = document.getElementById('checkrows');
+  var groups = ['All', 'Failed only'].concat(C.results.map(function (r) { return r.group; }).filter(function (g, i, a) { return a.indexOf(g) === i; }));
+  var cf = document.getElementById('checkfilter');
+  function render(g) {
+    rows.innerHTML = '';
+    C.results.filter(function (r) { return g === 'All' || (g === 'Failed only' ? !r.pass : r.group === g); }).forEach(function (r) {
+      var tr = document.createElement('tr');
+      [[r.pass ? 'PASS' : 'FAIL', 'r ' + (r.pass ? 'p' : 'f')], [r.group, ''], [r.item, ''], [r.check, ''], [r.detail, 'd']].forEach(function (c) {
+        var td = document.createElement('td'); td.textContent = c[0]; if (c[1]) td.className = c[1]; tr.appendChild(td);
+      });
+      rows.appendChild(tr);
+    });
+    [].forEach.call(cf.children, function (b) { b.setAttribute('aria-pressed', String(b.textContent === g)); });
+  }
+  groups.forEach(function (g) {
+    var b = document.createElement('button'); b.textContent = g; b.addEventListener('click', function () { render(g); }); cf.appendChild(b);
+  });
+  render('All');
+})();
+</script>
+</body>
+</html>

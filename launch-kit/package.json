@@ -1,0 +1,24 @@
+{
+  "name": "blame-launch-kit",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "kit": "node tools/render-all.mjs",
+    "card": "node tools/blame-card.mjs",
+    "video": "node tools/render-all.mjs --video-only",
+    "check": "node tools/check.mjs",
+    "studio": "remotion studio video/src/index.jsx --public-dir video/public"
+  },
+  "dependencies": {
+    "@fontsource-variable/archivo": "5.3.0",
+    "@remotion/bundler": "4.0.545",
+    "@remotion/cli": "4.0.545",
+    "@remotion/layout-utils": "4.0.545",
+    "@remotion/renderer": "4.0.545",
+    "fontkit": "3.0.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.545",
+    "sharp": "0.35.5"
+  }
+}

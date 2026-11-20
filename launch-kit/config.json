@@ -1,0 +1,11 @@
+{
+  "ca": "coming soon",
+  "logo": "B",
+  "site": "blamethestock.com",
+  "receipts": {
+    "devWallet": "[DEV WALLET 0x…]",
+    "devBuy": "[DEV BUY, e.g. 0.5 ETH]",
+    "devSold": "[DEV SOLD, e.g. 0%]",
+    "holding": "[DEV HOLDS, e.g. 2.1% of supply]"
+  }
+}

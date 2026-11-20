@@ -1,0 +1,4 @@
+node_modules/
+*.tmp.png
+*.tmp.mp4
+data/render-log.txt

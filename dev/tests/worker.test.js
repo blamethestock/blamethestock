@@ -18,7 +18,8 @@ const TOKEN = '0x5d992fa5b7da8efde5fd36d24e81097ed6ad4351';
 function fakeD1({ meta = {}, oldest = null } = {}) {
   const cache = new Map();   // key -> { body, expires }
   const jobs = new Map();    // key -> row
-  const db = { cache, jobs, meta, queries: 0, log: [] };
+  const counts = new Map();  // day -> n (the blame counter)
+  const db = { cache, jobs, meta, counts, queries: 0, log: [] };
   const exec = (sql, a) => {
     db.log.push(sql);
     if (W.SQL_SCHEMA.includes(sql)) return { results: [] };
@@ -29,6 +30,12 @@ function fakeD1({ meta = {}, oldest = null } = {}) {
       case W.SQL_JOBS_PURGE: for (const [k, j] of [...jobs]) if (j.created <= a[0]) jobs.delete(k); return { results: [] };
       case W.SQL_META: return { results: Object.entries(meta).map(([key, value]) => ({ key, value: String(value) })) };
       case W.SQL_OLDEST_TIME: return { results: oldest && oldest.block >= a[0] ? [{ time: oldest.time }] : [] };
+      case W.SQL_COUNT_ADD: counts.set(a[0], (counts.get(a[0]) || 0) + 1); return { results: [] };
+      case W.SQL_COUNT_GET: {
+        if (!counts.size) return { results: [{ total: 0, today: 0, since: null }] };
+        const total = [...counts.values()].reduce((x, y) => x + y, 0);
+        return { results: [{ total, today: counts.get(a[0]) || 0, since: Math.min(...counts.keys()) }] };
+      }
       default: throw new Error('fake D1: unexpected SQL ' + sql.slice(0, 80));
     }
   };
@@ -69,7 +76,7 @@ async function call(path, o = {}) {
   const deps = {
     now: o.now || NOW, budget, db, settings: o.settings || W.settingsFor({}),
     cache: o.cache ? o.cache.bind(budget) : null, limiter: o.limiter || null, index: o.index, copyMatches: o.copyMatches,
-    mcp: o.mcp, origins: o.origins,
+    mcp: o.mcp, origins: o.origins, rateBinding: o.rateBinding || null,
   };
   const r = await W.withBudget(budget, () => W.handle(req(path, o), o.env || {}, null, deps));
   return { ...r, json: r.body ? JSON.parse(r.body) : null, budget };
@@ -137,6 +144,37 @@ test('error codes map to HTTP statuses', () => {
 });
 
 // =========================================================================================================
+suite('worker › blame counter');
+
+test('POST /v1/count adds one to today (UTC); GET /v1/stats gives today, total and the first day; nothing about the visitor', async () => {
+  const db = fakeD1();
+  const empty = await call('/v1/stats', { db });
+  eq([empty.status, empty.json], [200, { ok: true, today: 0, total: 0, since: null, day: 'UTC' }]);
+  const DAY = 86400000, now = Date.UTC(2026, 10, 20, 15, 0, 0);
+  for (let i = 0; i < 3; i++) eq((await call('/v1/count', { db, method: 'POST', now: now - DAY })).status, 200);
+  for (let i = 0; i < 2; i++) eq((await call('/v1/count', { db, method: 'POST', now, origin: 'https://blamethestock.com' })).json, { ok: true });
+  const st = await call('/v1/stats', { db, now, origin: 'https://blamethestock.com' });
+  eq(st.json, { ok: true, today: 2, total: 5, since: '2026-11-19', day: 'UTC' });
+  eq(st.headers['access-control-allow-origin'], 'https://blamethestock.com');
+  ok(/max-age=30/.test(st.headers['cache-control'] || ''), String(st.headers['cache-control']));
+  eq([...db.counts.keys()].length, 2, 'one row per day, holding only a number');
+  ok(db.log.every((q) => !/203\.0\.113\.7/.test(q)), 'no IP in any query');
+});
+
+test('the counter: POST only, rate limited, and a D1 failure is a quiet 503 (the site carries on)', async () => {
+  eq((await call('/v1/count', { db: fakeD1() })).status, 405);
+  const limiter = W.createRateLimiter({ limit: 2 });
+  const db = fakeD1();
+  for (let i = 0; i < 2; i++) eq((await call('/v1/count', { db, limiter, method: 'POST' })).status, 200);
+  eq((await call('/v1/count', { db, limiter, method: 'POST' })).status, 429);
+  eq(db.counts.size === 1 && [...db.counts.values()][0], 2, 'the refused one is not counted');
+  const broken = fakeD1();
+  broken.prepare = () => { throw new Error('D1 down'); };
+  eq((await call('/v1/count', { db: broken, method: 'POST' })).json.code, 'unavailable');
+  eq((await call('/v1/stats', { db: broken })).status, 503);
+  eq((await call('/v1/count', { method: 'POST' })).status, 503, 'no database bound');
+});
+
 suite('worker › rate limit');
 
 test('60 a minute per IP, then 429 with Retry-After; the next minute starts over', async () => {
@@ -169,6 +207,44 @@ test('health is never rate limited; MCP is', async () => {
   const third = await call('/mcp', { limiter, mcp, method: 'POST' });
   eq(third.status, 429);
   eq(mcpCalls, 2);
+});
+
+test('Cloudflare rate-limit binding: shared count blocks, a broken binding never blocks, only the IP is sent', async () => {
+  const modules = { report: async () => ({ ok: false, code: 'not-found', message: 'x' }) };
+  const seen = [];
+  let allow = true;
+  const rateBinding = { limit: async (o) => { seen.push(o); return { success: allow }; } };
+  const a = await call('/v1/report/' + TOKEN, { limiter: W.createRateLimiter(), modules, rateBinding });
+  ok(a.status !== 429);
+  eq(seen, [{ key: '203.0.113.7' }], 'one call per request, keyed by IP only');
+  allow = false;
+  const b = await call('/v1/report/' + TOKEN, { limiter: W.createRateLimiter(), modules, rateBinding, origin: 'https://blamethestock.com' });
+  eq([b.status, b.json.code, b.headers['retry-after']], [429, 'rate-limited', '60']);
+  eq(b.headers['access-control-allow-origin'], 'https://blamethestock.com');
+  const broken = { limit: async () => { throw new Error('binding down'); } };
+  ok((await call('/v1/report/' + TOKEN, { limiter: W.createRateLimiter(), modules, rateBinding: broken })).status !== 429);
+  const n = seen.length;
+  eq((await call('/v1/health', { db: fakeD1({ meta: { last_block: 1 } }), rateBinding })).status, 200, 'health is never limited');
+  eq(seen.length, n, 'health does not touch the binding');
+  let mcpCalls = 0;
+  eq((await call('/mcp', { rateBinding, mcp: async () => { mcpCalls++; return { fake: true }; }, method: 'POST' })).status, 429);
+  eq(mcpCalls, 0);
+});
+
+// A project file (jsc only; null in a browser, where this check is skipped).
+function readText(rel) {
+  const url = import.meta.url;
+  if (typeof read === 'function' && /^file:/.test(url)) {
+    const dir = decodeURIComponent(url.replace(/^file:\/\//, '')).replace(/[^/]*$/, '');
+    try { return read(dir + '../../' + rel); } catch (e) { return null; }
+  }
+  return null;
+}
+
+test('wrangler.toml has the rate-limit binding (60 a minute)', () => {
+  const toml = readText('api/wrangler.toml');
+  if (toml === null) return;
+  ok(/\[\[ratelimits\]\]\s*\nname = "RATE_LIMITER"\s*\nnamespace_id = "\d+"\s*\nsimple = \{ limit = 60, period = 60 \}/.test(toml));
 });
 
 test('the limiter keeps only hashed keys, and forgets them each minute', () => {

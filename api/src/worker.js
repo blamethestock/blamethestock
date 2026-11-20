@@ -67,7 +67,13 @@ const SQL_SCHEMA = [
   'CREATE TABLE IF NOT EXISTS api_jobs (key TEXT PRIMARY KEY, kind TEXT NOT NULL, token TEXT NOT NULL, created INTEGER NOT NULL, touched INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, progress REAL)',
   'CREATE INDEX IF NOT EXISTS idx_api_jobs_touched ON api_jobs (touched)',
   'CREATE INDEX IF NOT EXISTS idx_api_jobs_created ON api_jobs (created)',
+  // Blame counter: one row per UTC day, just a number (no IPs, no coins, nothing about the visitor).
+  'CREATE TABLE IF NOT EXISTS blame_counts (day INTEGER PRIMARY KEY, n INTEGER NOT NULL)',
 ];
+// One row write per counted blame (INTEGER PRIMARY KEY: no extra index to write).
+const SQL_COUNT_ADD = 'INSERT INTO blame_counts (day, n) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET n = n + 1';
+const SQL_COUNT_GET = 'SELECT COALESCE(SUM(n), 0) AS total, COALESCE(SUM(CASE WHEN day = ? THEN n ELSE 0 END), 0) AS today, MIN(day) AS since FROM blame_counts';
+const STATS_SECONDS = 30;          // the counter answer is cached this long (Cloudflare and browsers)
 const SQL_META = 'SELECT key, value FROM meta';
 const SQL_OLDEST_TIME = 'SELECT time FROM launches WHERE block >= ?1 ORDER BY block ASC LIMIT 1';
 const SQL_NEWEST_AT = 'SELECT block, time FROM launches WHERE block <= ?1 ORDER BY block DESC LIMIT 1';
@@ -161,7 +167,7 @@ function createRateLimiter({ limit = RATE.perMinute, windowMs = RATE.windowMs, m
   };
 }
 
-// The site's SETTINGS with the API's OFFICIAL address (wrangler.toml [vars]) as the official list.
+// The site's SETTINGS (official coin from token.contractAddress); a non-empty OFFICIAL var (wrangler.toml) overrides it.
 function settingsFor(env, base = SETTINGS) {
   const official = String((env && env.OFFICIAL) || '').trim().toLowerCase();
   const trust = { ...(base.trust || {}) };
@@ -495,7 +501,34 @@ function linksBody(rawToken) {
 // =============================================================================================================
 // The router
 // =============================================================================================================
-const RATE_LIMITED = (path) => path === '/mcp' || path.startsWith('/v1/copies') || path.startsWith('/v1/report');
+const RATE_LIMITED = (path) => path === '/mcp' || path === '/v1/count' || path.startsWith('/v1/copies') || path.startsWith('/v1/report');
+
+// ---- the blame counter ----------------------------------------------------------------------------------------
+// POST /v1/count: the site sends one after each blame card it draws (no body; nothing about the visitor is kept,
+// the rate limit counts in memory only). GET /v1/stats: { today, total, since } with today = the current UTC day.
+const dayOf = (ms) => Math.floor(ms / 86400000);
+async function countBody(deps) {
+  if (!deps.db) return { status: 503, body: { ok: false, code: 'unavailable', message: 'Counter unavailable right now.' } };
+  try {
+    await ensureTables(deps.db);
+    await deps.db.prepare(SQL_COUNT_ADD).bind(dayOf(deps.now)).run();
+    return { status: 200, body: { ok: true } };
+  } catch (e) {
+    return { status: 503, body: { ok: false, code: 'unavailable', message: 'Counter unavailable right now.' } };
+  }
+}
+async function statsBody(deps) {
+  if (!deps.db) return { status: 503, body: { ok: false, code: 'unavailable', message: 'Stats unavailable right now.' } };
+  try {
+    await ensureTables(deps.db);
+    const r = await deps.db.prepare(SQL_COUNT_GET).bind(dayOf(deps.now)).first();
+    const num = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.floor(Number(v)) : 0);
+    const since = r && r.since != null && Number.isFinite(Number(r.since)) ? new Date(Number(r.since) * 86400000).toISOString().slice(0, 10) : null;
+    return { status: 200, body: { ok: true, today: num(r && r.today), total: num(r && r.total), since, day: 'UTC' }, cacheSeconds: STATS_SECONDS };
+  } catch (e) {
+    return { status: 503, body: { ok: false, code: 'unavailable', message: 'Stats unavailable right now.' } };
+  }
+}
 
 async function handle(request, env, ctx, deps) {
   const url = parseUrl(request.url);
@@ -506,7 +539,7 @@ async function handle(request, env, ctx, deps) {
   const cors = corsHeaders(origin, allowed);
 
   if (path === '/mcp') {
-    if (method !== 'OPTIONS' && !limit(request, deps).ok) return rateLimited(cors, deps);
+    if (method !== 'OPTIONS' && !(await limit(request, deps)).ok) return rateLimited(cors, deps);
     return mcpAnswer(request, env, ctx, deps);
   }
   if (method === 'OPTIONS') return jsonAnswer(204, null, { headers: preflightHeaders(origin, allowed) });
@@ -516,11 +549,20 @@ async function handle(request, env, ctx, deps) {
     headers: { ...cors, 'x-bts-budget': budgetHeader(deps.budget), ...extra },
   });
 
+  if (path === '/v1/count') {
+    if (method !== 'POST') {
+      return jsonAnswer(405, { ok: false, code: 'method', message: 'Only POST here.' }, { headers: { ...cors, allow: 'POST, OPTIONS' } });
+    }
+    const rl = await limit(request, deps);
+    if (!rl.ok) return rateLimited(cors, deps, rl);
+    const r = await countBody(deps);
+    return jsonAnswer(r.status, r.body, { headers: cors });
+  }
   if (method !== 'GET' && method !== 'HEAD') {
     return jsonAnswer(405, { ok: false, code: 'method', message: 'Only GET here.' }, { headers: { ...cors, allow: 'GET, OPTIONS' } });
   }
   if (RATE_LIMITED(path)) {
-    const rl = limit(request, deps);
+    const rl = await limit(request, deps);
     if (!rl.ok) return rateLimited(cors, deps, rl);
   }
 
@@ -528,13 +570,17 @@ async function handle(request, env, ctx, deps) {
     return jsonAnswer(200, {
       ok: true, service: 'bts-api', version: VERSION,
       about: 'Read-only facts about Robinhood Chain coins. Not financial advice. The launch index is served here; chain facts are read by the website in your browser.',
-      endpoints: ['/v1/health', '/v1/copies?q=TICKER|0xADDRESS', '/v1/report/0xTOKEN', '/v1/report/0xTOKEN/links', '/mcp'],
+      endpoints: ['/v1/health', '/v1/stats', '/v1/copies?q=TICKER|0xADDRESS', '/v1/report/0xTOKEN', '/v1/report/0xTOKEN/links', '/mcp'],
       site: 'https://blamethestock.com',
     }, { cacheSeconds: 300, headers: cors });
   }
   if (path === '/v1/health') {
     const r = await healthBody(deps);
     return jsonAnswer(r.status, r.body, { cacheSeconds: r.status === 200 ? HEALTH_SECONDS : 0, headers: cors });
+  }
+  if (path === '/v1/stats') {
+    const r = await statsBody(deps);
+    return jsonAnswer(r.status, r.body, { cacheSeconds: r.status === 200 ? r.cacheSeconds : 0, headers: cors });
   }
   if (path === '/v1/copies') {
     const p = url.params;
@@ -550,12 +596,23 @@ async function handle(request, env, ctx, deps) {
   return jsonAnswer(404, { ok: false, code: 'not-found', message: 'Nothing here. See /v1/health.' }, { headers: cors });
 }
 
-function limit(request, deps) {
-  if (!deps.limiter) return { ok: true };
+// Two layers, both in memory only (nothing about the visitor is stored):
+//  1. this copy of the Worker's own counter (cheap, catches a burst that lands on one copy);
+//  2. Cloudflare's rate-limit binding (env.RATE_LIMITER, see wrangler.toml), shared by every copy of the Worker in
+//     a Cloudflare location, so many requests spread over many copies are still counted together.
+// If the binding is missing or fails, the request is let through on the first layer alone (never a false 429).
+async function limit(request, deps) {
   if (deps.limitResult) return deps.limitResult;     // one count per request
   const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || 'unknown';
-  deps.limitResult = deps.limiter.hit(ip, deps.now);
-  return deps.limitResult;
+  let res = deps.limiter ? deps.limiter.hit(ip, deps.now) : { ok: true };
+  if (res.ok && deps.rateBinding && typeof deps.rateBinding.limit === 'function') {
+    try {
+      const out = await deps.rateBinding.limit({ key: ip });
+      if (out && out.success === false) res = { ok: false, resetSeconds: 60 };
+    } catch (e) { /* binding unavailable: the first layer stands */ }
+  }
+  deps.limitResult = res;
+  return res;
 }
 function rateLimited(cors, deps, rl = deps.limitResult) {
   const wait = (rl && rl.resetSeconds) || 60;
@@ -637,6 +694,7 @@ function requestDeps(request, env, ctx, extra = {}) {
     settings: settingsFor(env),
     cache: cfCache(budget, url.origin, ctx),
     limiter,
+    rateBinding: env && env.RATE_LIMITER ? env.RATE_LIMITER : null,
     ...extra,
   };
 }
@@ -646,10 +704,10 @@ function requestDeps(request, env, ctx, extra = {}) {
 const internals = {
   VERSION, DEFAULT_ORIGINS, RATE, TTL, BROWSER_SECONDS, HEALTH_SECONDS, INDEXER_SUBREQUESTS, INDEXER_LOG_SPAN, INDEXER_LOG_REQUESTS,
   INDEXER_MAX_BLOCKS, INDEXER_MAX_ROWS, AVOID, REPORT_NOTE, LINKS_NOTE,
-  SQL_SCHEMA, SQL_META, SQL_OLDEST_TIME, SQL_NEWEST_AT, SQL_CACHE_GET, SQL_CACHE_PUT, SQL_CACHE_PURGE, SQL_JOBS_PURGE,
+  SQL_SCHEMA, SQL_COUNT_ADD, SQL_COUNT_GET, STATS_SECONDS, SQL_META, SQL_OLDEST_TIME, SQL_NEWEST_AT, SQL_CACHE_GET, SQL_CACHE_PUT, SQL_CACHE_PURGE, SQL_JOBS_PURGE,
   rowCachedIndex, parseUrl, allowedOrigins, corsHeaders, preflightHeaders, hashKey, createRateLimiter, settingsFor, statusFor,
   jsonAnswer, toResponse, routedFetch, withBudget, useAsyncLocalStorage, requestLanes, _resetForTests, ensureTables, cfCache, d1Get, d1Put, cacheGet,
-  cachePut, healthBody, copiesBody, reportBody, linksBody, reportBasicsOf, handle, runScheduled, requestDeps,
+  cachePut, healthBody, countBody, statsBody, copiesBody, reportBody, linksBody, reportBasicsOf, handle, runScheduled, requestDeps,
 };
 
 export default {

@@ -36,3 +36,6 @@ CREATE TABLE IF NOT EXISTS report_cache (
 );
 -- Purging expired rows reads only those rows.
 CREATE INDEX IF NOT EXISTS idx_report_cache_expires ON report_cache (expires_at) WHERE expires_at IS NOT NULL;
+
+-- Blame counter: one row per UTC day (day = days since 1970-01-01), just a number. Nothing about visitors.
+CREATE TABLE IF NOT EXISTS blame_counts (day INTEGER PRIMARY KEY, n INTEGER NOT NULL);

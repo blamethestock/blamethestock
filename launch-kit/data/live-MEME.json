@@ -1,0 +1,128 @@
+{
+ "pi": {
+  "ok": true,
+  "coin": {
+   "address": "0x385f4f8ae47651ce5f58f5265395a669f8281e18",
+   "symbol": "MEME",
+   "name": "A Meme Coin"
+  },
+  "pair": {
+   "address": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+   "symbol": "AMC",
+   "kind": "stock",
+   "lookalike": false
+  },
+  "pool": {
+   "id": "0x27ccf0a6d1ee74840220715bcca7d3b01e0d33aa30d0259b47ae1585b3f4c071",
+   "dex": "uniswap v4",
+   "label": "MEME/AMC",
+   "pairSideUsd": 310971.6460753329,
+   "createdAt": 1788467405,
+   "source": "dexscreener"
+  },
+  "window": "24h",
+  "windowSeconds": 86400,
+  "start": {
+   "block": 117156508,
+   "time": 1794978742
+  },
+  "end": {
+   "block": 117975208,
+   "time": 1795065142
+  },
+  "sinceLaunch": false,
+  "coinInPair": {
+   "start": 0.0008548611932962782,
+   "end": 0.000945541891185255
+  },
+  "pairUsd": {
+   "start": 3.1927321765340393,
+   "end": 3.0402765444774635
+  },
+  "pairVia": {
+   "id": "0x7499938c352d5b5b8f0c648722aca5ee964ef9b85c3a3041f1ec379726291d9d",
+   "label": "AMC/USDG"
+  },
+  "tradedInWindow": true
+ },
+ "res": {
+  "ok": true,
+  "coin": {
+   "address": "0x385f4f8ae47651ce5f58f5265395a669f8281e18",
+   "symbol": "MEME"
+  },
+  "pair": {
+   "address": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+   "symbol": "AMC",
+   "kind": "stock",
+   "name": "the stock (AMC)",
+   "short": "AMC"
+  },
+  "window": "24h",
+  "windowLabel": "24h",
+  "c": 0.05326043809660552,
+  "q": -0.04775083647074907,
+  "r": 0.1060765169832063,
+  "share": -0.9429186783597889,
+  "sharePct": 0,
+  "caseName": "opposite",
+  "bar": {
+   "pair": 0,
+   "coin": 1
+  },
+  "lead": "You're up 5.3%.",
+  "blame": "The stock (AMC) went the other way (−4.8%), so it's all the coin.",
+  "verdict": "You're up 5.3%. The stock (AMC) went the other way (−4.8%), so it's all the coin.",
+  "subline": "On its own, MEME was up 11% against AMC.",
+  "headline": {
+   "value": 0.05326043809660552,
+   "text": "+5.3%"
+  },
+  "numbers": [
+   {
+    "key": "coin",
+    "label": "MEME in $",
+    "value": 0.05326043809660552,
+    "text": "+5.3%",
+    "arrow": "↑"
+   },
+   {
+    "key": "pair",
+    "label": "AMC",
+    "value": -0.04775083647074907,
+    "text": "−4.8%",
+    "arrow": "↓"
+   },
+   {
+    "key": "own",
+    "label": "MEME vs AMC",
+    "value": 0.1060765169832063,
+    "text": "+11%",
+    "arrow": "↑"
+   }
+  ],
+  "notes": [
+   "AMC here is its token price on Robinhood Chain, which can differ from the share price.",
+   "Measured in the MEME/AMC pool."
+  ],
+  "warnings": [],
+  "asOf": 1795065142,
+  "asOfText": "Prices as of 12:12 AM EST",
+  "shareText": "My $MEME is up 5.3% (24h). The stock (AMC) went the other way (−4.8%), so it's all the coin.",
+  "link": "https://blamethestock.com/?ca=0x385f4f8ae47651ce5f58f5265395a669f8281e18&w=24h",
+  "pool": {
+   "label": "MEME/AMC",
+   "pairSideUsd": 310971.6460753329
+  },
+  "blocks": {
+   "start": {
+    "block": 117156508,
+    "time": 1794978742
+   },
+   "end": {
+    "block": 117975208,
+    "time": 1795065142
+   }
+  }
+ }
+}

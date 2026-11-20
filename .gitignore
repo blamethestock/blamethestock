@@ -1,7 +1,28 @@
+# Dependencies and build caches
+node_modules/
+.wrangler/
+.dev.vars*
+.env
+.env.*
+
+# Mac and editor files
 .DS_Store
+.claude/
+
+# Logs
+*.log
+logs/
+
+# Local-only: build output, upload copies, owner notes
 dev/out/
 upload-now/
-api/node_modules/
-api/.wrangler/
-mcp/node_modules/
+reports/
 *.zip
+
+# Launch kit: rendered images and video are made locally, not kept in the repo
+launch-kit/video/
+launch-kit/posts/
+launch-kit/cards/
+launch-kit/data/render-log.txt
+launch-kit/*.tmp.png
+launch-kit/*.tmp.mp4

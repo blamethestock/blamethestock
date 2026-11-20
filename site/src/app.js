@@ -38,6 +38,7 @@ function setUrl(address, w) {
     const u = new URL(location.href);
     if (address) u.searchParams.set('ca', address); else u.searchParams.delete('ca');
     u.searchParams.delete('q');
+    u.searchParams.delete('view');
     u.searchParams.set('w', w);
     history.replaceState(history.state, '', u.pathname + u.search + u.hash);
   } catch (e) { /* file:// or locked-down browsers: the link still works from Copy link */ }
@@ -134,6 +135,7 @@ export async function lookup(raw, win, { scroll = true } = {}) {
   if (result && result.ok) {
     const off = offHoursOn();
     renderResult(out, result, { onWindow: again, settings: SETTINGS, offHours: off });
+    import('./ui/stats.js').then((m) => m.countBlame(address, w)).catch(() => { /* the counter never matters to the card */ });
     if (off) showOffHours(out, res, result, my).catch(() => { /* the card itself is already drawn */ });
   } else {
     renderError(out, result && result.message ? result : toError(result), {
@@ -273,6 +275,7 @@ function tickerLookup(ticker, { scroll = true } = {}) {
   try {
     const u = new URL(location.href);
     u.searchParams.delete('ca');
+    u.searchParams.delete('view');
     u.searchParams.set('q', ticker);
     history.replaceState(history.state, '', u.pathname + u.search + u.hash);
   } catch (e) { /* the card still shows */ }
@@ -294,6 +297,40 @@ export function devApi(loc = typeof location !== 'undefined' ? location : null, 
     settings.trust.apiBase = base;
     return base;
   } catch (e) { return null; }
+}
+
+// A section link: ?ca=0x…&view=copies|report (or ?q=TICKER&view=copies) opens on that card instead of the blame card.
+// The card fills in bit by bit and the cards above it grow, so it is brought into view when it first appears and
+// again each time something above it changes, until the visitor scrolls, touches, clicks or types (then the page
+// stays put; the browser's own scroll corrections don't count), or after a minute.
+export function viewOf(raw) {
+  const v = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return v === 'copies' || v === 'report' ? v : null;
+}
+function followSection(id, { ms = 60000 } = {}) {
+  const target = $(id);
+  if (!target || typeof MutationObserver === 'undefined') return false;
+  let first = true, done = false;
+  const stop = () => {
+    if (done) return;
+    done = true;
+    try { obs.disconnect(); } catch (e) { /* already stopped */ }
+    ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach((t) => window.removeEventListener(t, stop, true));
+  };
+  const go = () => {
+    if (done || !target.firstElementChild) return;
+    if (first && !untouched()) { stop(); return; }   // they were already reading something else
+    first = false;
+    try { target.scrollIntoView({ behavior: 'auto', block: 'start' }); } catch (e) { target.scrollIntoView(); }
+  };
+  // One scroll per burst of changes. A timer, not an animation frame, so a link opened in a background tab still lands.
+  let timer = null;
+  const soon = () => { if (!timer) timer = setTimeout(() => { timer = null; go(); }, 60); };
+  const obs = new MutationObserver(soon);
+  ['result', 'copies', 'report'].forEach((k) => { const el = $(k); if (el) obs.observe(el, { childList: true, subtree: true }); });
+  ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach((t) => window.addEventListener(t, stop, true));
+  setTimeout(stop, ms);
+  return true;
 }
 
 function submitFromInput({ blur = true } = {}) {
@@ -365,10 +402,13 @@ export function boot() {
   const params = new URLSearchParams(location.search);
   const ca = params.get('ca');
   shown.window = parseWindow(params.get('w'), SETTINGS);
+  const view = viewOf(params.get('view'));
   if (ca) {
     const input = $('ca-input');
     if (input) input.value = ca.trim();
-    lookup(ca, shown.window, { scroll: 'if-untouched' });
+    const section = view && copiesOn() && (view === 'copies' || reportOn()) && validateAddress(ca) ? view : null;
+    const following = section ? followSection(section) : false;
+    lookup(ca, shown.window, { scroll: following ? false : 'if-untouched' });
   } else if (tickerOf(params.get('q')) && copiesOn()) {
     const input = $('ca-input');
     if (input) input.value = params.get('q').trim();

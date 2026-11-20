@@ -5,7 +5,7 @@
 import { suite, test, eq, ok } from './harness.js';
 import {
   reportView, linksView, linkedVerdict, checkReport, checkLinks, checkBasics, fetchBasics, loadReport, loadLinks, errorText, retryable,
-  renderReport, renderReportLoading, renderLinks, showReport, tokensText, pctText, words, MAX_WAIT_MS,
+  renderReport, renderReportLoading, renderLinks, showReport, receiptsView, showReceipts, tokensText, pctText, words, MAX_WAIT_MS,
 } from '../../site/src/ui/report-card.js';
 import { SETTINGS } from '../../site/settings.js';
 import { loadReportFixture, runReportScenario, REPORT_SCENARIOS, OBSYN } from './fixtures/obsyn/report-replay.js';
@@ -43,7 +43,7 @@ test('real OBSYN: title, verdict, dev facts and the dev step list in time order,
   eq(v.verdict, REAL_VERDICT);
   eq(v.official, null);
   eq(v.dev.facts.map((f) => [f.key, f.text]), [
-    ['wallet', '0x0341…5c32'], ['buy', '1.14%'], ['sold', 'nothing'], ['fees', '2.07 ETH'], ['unclaimed', '0.1931 ETH'], ['bridged', '0.18 ETH']]);
+    ['wallet', '0x0341…5c32'], ['buy', '1.14% of supply'], ['sold', 'nothing'], ['fees', '2.07 ETH'], ['unclaimed', '0.1931 ETH'], ['bridged', '0.18 ETH']]);
   eq(v.dev.steps.map((s) => s.kind), ['launch', 'send', 'burn', 'claim', 'graduated', 'buy', 'bridge', 'buy', 'buy', 'buy', 'burn', 'buy', 'claim']);
   const t = v.dev.steps.map((s) => s.text);
   eq(t[0], 'Launched the coin and bought 1.14% of supply (11.4M tokens) for 0.02 ETH');
@@ -115,7 +115,7 @@ test('copycat OBSYN: the dev sell is the one vermilion step; unconfirmed bridge;
   const sell = v.dev.steps[1];
   eq([sell.text, sell.rel, !!sell.warn], ['Sold 8.59M tokens (0.86%) for 0.0163 ETH', '+1 min 11 s', true]);
   eq(v.dev.steps[3].text, 'Bridged 0.0473 ETH out through MetaBridge/Relay to chain 56 (not confirmed)');
-  eq(v.dev.facts.find((f) => f.key === 'sold').text, '0.86%');
+  eq(v.dev.facts.find((f) => f.key === 'sold').text, '0.86% of supply');
   ok(!v.dev.facts.some((f) => f.key === 'unclaimed'), 'nothing left unclaimed: no fact for it');
   ok(v.snipers.rows.every((r) => r.statusText === 'Sold on the curve'), 'no graduation: "on the curve"');
   eq(v.activity.graduation.text, 'Not graduated yet');
@@ -339,6 +339,9 @@ test('drawn card: verdict big, Dev / First buyers / Activity / Wallet links bloc
     eq(c.querySelector('.rc-links').getAttribute('data-state'), 'done');
     ok(/Across MulticallHandler/.test(c.querySelector('.rc-funder').textContent));
     eq(c.querySelector('.rc-links-none').textContent, 'No funding links found between the dev and the 9 first buyers we checked.');
+    const CAVEAT = 'Wallets funded through exchanges, bridges or privacy tools can\'t be linked.';
+    const said = [...c.querySelectorAll('.rc-note'), ...c.querySelectorAll('.cc-caveats li')].filter((e) => e.textContent === CAVEAT).length;
+    eq(said, 1, 'the "can\'t be linked" caveat is said once, not twice');
   });
 });
 
@@ -451,3 +454,48 @@ test('code: the card writes text only (no innerHTML), app.js loads it after the 
   ok(/import\('\.\/ui\/report-card\.js'\)/.test(app), 'loaded only when needed');
   ok((app.match(/report\(null\)/g) || []).length >= 2, 'cleared for a bad entry and for a ticker');
 });
+
+// ---- Receipts (the official coin's dev wallet) --------------------------------------------------------------
+const OBSYN_DEV = '0x03412bAadD3D3207506E89CebB051ab713295c32';
+const RECEIPT_SETTINGS = { ...SETTINGS, token: { ...SETTINGS.token, ticker: '$OBSYN' } };
+
+test('receipts: the dev block only when the settings wallet launched the coin; each step links its transaction', async () => {
+  const { again } = await obsyn('real OBSYN');
+  const v = receiptsView(again, OBSYN_DEV, RECEIPT_SETTINGS, NY);
+  eq(v.state, 'done');
+  eq(v.title, 'Receipts');
+  eq(v.intro, 'What the $OBSYN dev wallet has done, read live from the chain. Every line links to its transaction.');
+  eq(v.dev.facts.find((f) => f.key === 'buy').text, '1.14% of supply');
+  const kinds = new Set(v.dev.steps.map((st) => st.kind));
+  for (const k of ['launch', 'burn', 'claim']) ok(kinds.has(k), k);
+  for (const st of v.dev.steps) ok(/^https:\/\/robinhoodchain\.blockscout\.com\/tx\/0x[0-9a-f]{64}$/.test(st.url), st.kind + ' ' + st.url);
+  eq(receiptsView(again, OBSYN_DEV.toLowerCase(), RECEIPT_SETTINGS, NY).state, 'done', 'any letter case');
+});
+
+test('receipts: a different wallet in settings shows one line and no numbers; errors are one line', async () => {
+  const { again } = await obsyn('real OBSYN');
+  const other = '0x' + '1'.repeat(40);
+  const v = receiptsView(again, other, RECEIPT_SETTINGS, NY);
+  eq(v.state, 'mismatch');
+  eq(v.text, "The dev wallet in our settings (0x1111…1111) isn't the wallet that launched $OBSYN on the chain (0x0341…5c32), so no receipts are shown.");
+  ok(!('dev' in v), 'nothing from the chain is shown');
+  eq(receiptsView(again, '', RECEIPT_SETTINGS, NY).state, 'mismatch');
+  const err = receiptsView(null, OBSYN_DEV, RECEIPT_SETTINGS, NY);
+  eq([err.state, err.text, err.retry], ['error', 'Receipts unavailable right now.', true]);
+  eq(receiptsView({ ok: false, code: 'not-pons' }, OBSYN_DEV, RECEIPT_SETTINGS, NY).retry, false);
+});
+
+test('receipts: drawn card has the title, intro, dev facts and steps, and only explorer links', async () => {
+  const { again } = await obsyn('real OBSYN');
+  await withDoc(async (mount) => {
+    const v = await showReceipts(mount, again.token.address, OBSYN_DEV, RECEIPT_SETTINGS, { ...NY, buildReport: async () => again, fetch: async () => { throw new Error('offline'); } });
+    eq(v && v.state, 'done');
+    const c = mount.firstElementChild;
+    eq(c.querySelector('.cc-title').textContent, 'Receipts');
+    ok(c.querySelector('.rc-receipts-intro'));
+    ok(c.querySelectorAll('.rc-step').length > 5);
+    eq(c.querySelectorAll('.rc-wallet').length, 0, 'no snipers block');
+    for (const a of c.querySelectorAll('a')) ok(PROOF.test(a.getAttribute('href')), a.getAttribute('href'));
+  });
+});
+

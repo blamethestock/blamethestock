@@ -202,6 +202,15 @@ function tokenRow(label, ...value) {
   return h('div', { class: 'token-row' }, h('dt', {}, label), h('dd', {}, ...value));
 }
 
+const EXPLORER = 'https://robinhoodchain.blockscout.com';
+
+function explorerLink(kind, address, label = 'Explorer') {
+  return h('a', { class: 'token-copy token-explorer', href: `${EXPLORER}/${kind}/${address}`, target: '_blank', rel: 'noopener noreferrer' },
+    label, h('span', { 'aria-hidden': 'true' }, ' ↗'), h('span', { class: 'visually-hidden' }, ' (opens in a new tab)'));
+}
+
+// The one launch-day setting: token.contractAddress. Empty -> "CA: coming soon". A well-formed address -> the
+// address with a ✅ Official badge, a Copy button and an explorer link (settings.js switches the rest on).
 function fillToken() {
   const t = S.token || {};
   const ticker = text(t.ticker) || '$BLAME';
@@ -211,22 +220,20 @@ function fillToken() {
   const body = byId('token-body');
   if (body) {
     const contract = text(t.contractAddress);
-    // Only ever show an address when the switch is on AND the address is well-formed.
-    const live = t.launched === true && ADDRESS.test(contract);
-    if (!live) {
-      body.replaceChildren(h('p', { class: 'token-status' },
-        h('strong', {}, 'Not live yet.'), ` Any address claiming to be ${ticker} is not ours.`));
+    if (!ADDRESS.test(contract)) {
+      body.replaceChildren(
+        h('p', { class: 'token-ca token-ca-soon' }, h('span', { class: 'token-ca-label' }, 'CA:'), ' ', h('strong', {}, 'coming soon')),
+        h('p', { class: 'token-status' }, `Any address claiming to be ${ticker} before we post it here is not ours.`));
     } else {
-      const rows = [tokenRow('Contract', h('code', { class: 'token-addr' }, contract), copyButton(contract, 'contract address'))];
+      const rows = [tokenRow('CA', h('code', { class: 'token-addr' }, contract), copyButton(contract, 'contract address'), explorerLink('token', contract))];
       const pons = text(t.ponsUrl);
       if (/^https:\/\/[^\s"'<>]+$/i.test(pons)) {
         rows.push(tokenRow('Pons', h('a', { class: 'token-link', href: pons, target: '_blank', rel: 'noopener noreferrer' }, `${ticker} on Pons`)));
       }
       const dev = text(t.devWallet);
-      if (ADDRESS.test(dev)) rows.push(tokenRow('Dev wallet', h('code', { class: 'token-addr' }, dev), copyButton(dev, 'dev wallet address')));
-      const buy = text(t.devBuy);
-      if (buy) rows.push(tokenRow('Dev buy', h('span', {}, buy)));
+      if (ADDRESS.test(dev)) rows.push(tokenRow('Dev wallet', h('code', { class: 'token-addr' }, dev), copyButton(dev, 'dev wallet address'), explorerLink('address', dev)));
       body.replaceChildren(
+        h('p', { class: 'token-official' }, h('span', { class: 'token-badge' }, `✅ Official ${ticker}`)),
         h('p', { class: 'token-status' }, h('strong', {}, `This is the only ${ticker}.`), ' Any other address is not ours.'),
         h('dl', { class: 'token-rows' }, rows),
       );
@@ -234,6 +241,30 @@ function fillToken() {
   }
   const free = byId('token-free');
   if (free) free.textContent = `The tool is free. You never need to hold ${ticker}.`;
+}
+
+// ---- 6b. receipts: the dev wallet, live from the chain ----
+// Shown only when settings.js has both the contract address and the dev wallet. Loaded on its own and never
+// holds up the rest of the page; if the chain or our API can't be reached it says so in one grey line.
+function fillReceipts() {
+  const t = S.token || {};
+  const section = byId('receipts');
+  const body = byId('receipts-body');
+  if (!section || !body) return;
+  const ca = text(t.contractAddress), dev = text(t.devWallet);
+  const on = ADDRESS.test(ca) && ADDRESS.test(dev) && !!(S.trust && S.trust.apiBase);
+  section.hidden = !on;
+  if (!on) { body.textContent = ''; return; }
+  import('./report-card.js')
+    .then((card) => card.showReceipts(body, ca, dev, S))
+    .catch(() => {
+      body.replaceChildren(h('p', { class: 'cc-line rc-line' }, 'Receipts unavailable right now.'));
+    });
+}
+
+// ---- blame counter (hero line) ----
+function fillStats() {
+  import('./stats.js').then((m) => m.showStats()).catch(() => { /* the line stays hidden */ });
 }
 
 // ---- 7. update log ----
@@ -262,10 +293,27 @@ function fillUpdates() {
     h('p', {}, text(u.text)))));
 }
 
+// "owner/repo" (or a pasted github.com link) -> the repo's page; anything else hides the link.
+function githubUrl(value) {
+  const repo = text(value)
+    .replace(/^(?:https?:\/\/)?(?:www\.)?github\.com\//i, '')
+    .replace(/(?:\.git)?[/?#]*$/, '');
+  return /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/.test(repo) ? `https://github.com/${repo}` : '';
+}
+
 // ---- 8. footer ----
 function fillFooter() {
   const mark = byId('footer-mark');
   if (mark) mark.textContent = siteName().toUpperCase();
+  const gh = byId('footer-github');
+  const ghUrl = githubUrl(S.githubRepo);
+  if (gh) {
+    gh.hidden = !ghUrl;
+    if (ghUrl) {
+      gh.href = ghUrl;
+      gh.setAttribute('aria-label', `${siteName()} code on GitHub`);
+    }
+  }
   const name = byId('footer-name');
   if (name) {
     let host = '';
@@ -338,7 +386,7 @@ function safely(step) {
 function boot() {
   let font = { ready: Promise.resolve() };
   safely(() => { font = loadFont(); });
-  [fillMenu, fillHero, fillMarquee, fillToken, fillUpdates, fillFooter, wirePasteButtons, startBoard].forEach(safely);
+  [fillMenu, fillHero, fillMarquee, fillToken, fillReceipts, fillStats, fillUpdates, fillFooter, wirePasteButtons, startBoard].forEach(safely);
   safely(() => initMotion({ ratio: S.headline && S.headline.widthOfScreen, fontReady: font.ready }));
   document.documentElement.classList.add('page-ok');
 

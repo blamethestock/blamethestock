@@ -492,3 +492,19 @@ pageTest('openCoin sends one bts:open event with the address and window', () => 
   eq(seen.length, 1);
   eq([seen[0].type, seen[0].detail], ['bts:open', { address: ZOLVA, window: '6h' }]);
 }));
+
+pageTest('the blame card links its numbers to the explorer (coin, pool or curve, start and end blocks)', () => onPage({}, (p) => {
+  const curve = '0x' + 'cd'.repeat(20);
+  const base = pi({});
+  const card = renderResult(p.result, buildResult({ ...base, start: { ...base.start, block: 117000000 }, end: { ...base.end, block: 117000300 },
+    pool: { ...base.pool, id: curve, source: 'pons-curve' } }, SETTINGS, NY), { onWindow: () => {}, settings: SETTINGS, prepareImage: false });
+  const links = card.querySelectorAll('.bts-proof-link');
+  eq(links.map((a) => a.getAttribute('href')), [
+    'https://robinhoodchain.blockscout.com/token/' + ZOLVA,
+    'https://robinhoodchain.blockscout.com/address/' + curve,
+    'https://robinhoodchain.blockscout.com/block/117000000',
+    'https://robinhoodchain.blockscout.com/block/117000300',
+  ]);
+  eq(links.map((a) => a.textContent.split(' ↗')[0]), ['ZOLVA', 'launch curve', 'start block', 'end block']);
+  ok(links.every((a) => a.getAttribute('target') === '_blank' && a.getAttribute('rel') === 'noopener noreferrer'));
+}));

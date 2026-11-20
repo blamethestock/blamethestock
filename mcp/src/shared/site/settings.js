@@ -26,18 +26,24 @@ export const SETTINGS = {
   site: {
     name: "Blame the Stock",
     url: "https://blamethestock.com",       // no slash at the end
-    description: "Paste a Robinhood Chain coin. See how much of its move came from what it's paired with.",
+    description: "Your coin didn't pump. The stock did. Paste any Robinhood Chain coin and see how much of its move was the stock.",
   },
-  xHandle: "",              // your X handle without the @. Empty = the X link is hidden.
+  xHandle: "blamethestock", // your X handle without the @. Empty = the X link is hidden.
+  githubRepo: "blamethestock/blamethestock", // the public code, as "owner/repo". Empty = the GitHub link is hidden.
 
   // ---- $BLAME token --------------------------------------------------
   token: {
-    launched: false,        // switch to true at launch
     ticker: "$BLAME",
-    contractAddress: "",    // 0x... (shown only when launched is true)
-    ponsUrl: "",            // link to $BLAME on Pons
-    devWallet: "",          // 0x...
-    devBuy: "",             // for example "0.5 ETH"
+    // THE LAUNCH-DAY SETTING. Paste the $BLAME contract address between the quotes: "0x…" (42 characters).
+    //   Empty  -> the site says "CA: coming soon".
+    //   Filled -> the address shows with a ✅ Official badge, a Copy button and an explorer link, the copy check
+    //             marks it as the official coin (site and API), and the launch-day update notes appear.
+    // Nothing else needs switching on.
+    contractAddress: "",
+    // The dev wallet ("0x…"). Filled -> the Receipts section shows, live from the chain, the dev's buy, sells,
+    // burns and fee claims, each with its transaction. Empty -> no Receipts section.
+    devWallet: "",
+    ponsUrl: "",            // optional: the https:// link to $BLAME on Pons
   },
 
   // ---- Feature switches ----------------------------------------------
@@ -53,10 +59,7 @@ export const SETTINGS = {
     enabled: true,          // false = no copy check card at all
     apiBase: "https://api.blamethestock.com",   // no slash at the end
 
-    // The official coins. Empty until launch day. On launch day it gets one entry:
-    //   official: [{ symbol: "BLAME", address: "0x…" }],   <- the same address as token.contractAddress above
-    // (The API's OFFICIAL setting must hold the same address.)
-    official: [],
+    // The official coin comes from token.contractAddress above (see the end of this file); nothing to fill here.
 
     // When a flag goes up. (The API uses the same numbers; change both together.)
     launchedJustBeforeMinutes: 60,   // same name, launched this many minutes (or less) before the other coin
@@ -220,8 +223,8 @@ export const SETTINGS = {
 
   // ---- Update log (newest first) -------------------------------------
   updates: [
-    // whenLaunched: true = this entry only shows after you switch launched (above) to true.
-    { date: "2026-11-17", text: "Blame the Stock is live. Paste any Robinhood Chain coin.", whenLaunched: true },
+    // whenLaunched: true = this entry only shows once token.contractAddress (above) is filled in.
+    { date: "2026-11-20", text: "Blame the Stock is live. Paste any Robinhood Chain coin.", whenLaunched: true },
   ],
 
   // ---- Safety limits (change only if you know why) -------------------
@@ -305,3 +308,17 @@ export const SETTINGS = {
     },
   },
 };
+
+// ---- Worked out from the settings above. Don't edit below this line. ----------------------------------------
+// token.contractAddress is the one switch: a well-formed address turns the coin on everywhere.
+export function applyContractAddress(s) {
+  const ca = String(s.token.contractAddress || "").trim();
+  const live = /^0x[0-9a-fA-F]{40}$/.test(ca);
+  s.token.contractAddress = live ? ca : "";
+  s.token.launched = live;
+  s.trust.official = live
+    ? [{ symbol: String(s.token.ticker || "$BLAME").replace(/^\$/, ""), address: ca.toLowerCase() }]
+    : [];
+  return s;
+}
+applyContractAddress(SETTINGS);

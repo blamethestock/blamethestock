@@ -20,6 +20,7 @@ import './copycheck.test.js';   // fake-copy logic (OBSYN fixtures)
 import './copycard.test.js';    // copy-check card
 import './report.test.js';      // launch report + wallet links
 import './reportcard.test.js';  // launch-report card
+import './stats.test.js';       // blame counter (site)
 import './worker.test.js';      // API Worker (router, CORS, cache, limits)
 import './mcp.test.js';         // MCP tools
 // =================== END OF TEST FILES ================

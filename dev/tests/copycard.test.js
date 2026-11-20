@@ -3,8 +3,8 @@
 // The OBSYN results are the real copy check replayed offline (dev/tests/fixtures/obsyn).
 import { suite, test, eq, ok } from './harness.js';
 import { copyView, fetchCopies, checkAnswer, errorText, relative, when, words, shortAddr, loadCopies, apiBaseOf } from '../../site/src/ui/copycheck-card.js';
-import { tickerOf, devApi } from '../../site/src/app.js';
-import { SETTINGS } from '../../site/settings.js';
+import { tickerOf, devApi, viewOf } from '../../site/src/app.js';
+import { SETTINGS, applyContractAddress } from '../../site/settings.js';
 import { TRUST_DEFAULTS, trustSettings, CAVEATS } from '../../site/src/trust/rules.js';
 import { loadFixture, runScenario, replayFetch, fixtureIndex, OBSYN } from './fixtures/obsyn/replay.js';
 import { copyMatches } from '../../api/src/copies.js';
@@ -186,6 +186,19 @@ test('a ticker is one word, not 0x…, up to 32 characters, with a letter or num
 });
 
 // ---- settings, page and safety rules ----------------------------------------------------------------------
+test('one launch-day setting: token.contractAddress switches the coin on (official list, launched), junk stays off', () => {
+  const make = (ca) => applyContractAddress({ token: { ticker: '$BLAME', contractAddress: ca }, trust: {} });
+  const A = '0x' + 'aB'.repeat(20);
+  const on = make('  ' + A + ' ');
+  eq([on.token.launched, on.token.contractAddress], [true, A]);
+  eq(on.trust.official, [{ symbol: 'BLAME', address: A.toLowerCase() }]);
+  eq(trustSettings(on).official.map((o) => [o.address, o.skeleton]), [[A.toLowerCase(), 'blame']]);
+  for (const bad of ['', '0x123', A + 'f', 'coming soon', null, undefined]) {
+    const off = make(bad);
+    eq([off.token.launched, off.token.contractAddress, off.trust.official], [false, '', []], String(bad));
+  }
+});
+
 test('settings.trust mirrors the logic\'s thresholds; the official list is empty until launch, then holds the coin', () => {
   const t = SETTINGS.trust;
   for (const k of Object.keys(TRUST_DEFAULTS)) if (k !== 'official' && k !== 'maxFacts') eq(t[k], TRUST_DEFAULTS[k], k);
@@ -321,3 +334,17 @@ test('local development: ?dev-api= is honoured only on a page served from this m
   eq(apiBaseOf(S('https://user@evil.example')), null);
   eq(apiBaseOf(S('http://localhost:8787')), typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? 'http://localhost:8787' : null);
 });
+
+test('section links: ?view=copies|report only', () => {
+  eq(viewOf('copies'), 'copies');
+  eq(viewOf(' Report '), 'report');
+  for (const s of [null, '', 'blame', 'javascript:alert(1)', 'copies2', 42]) eq(viewOf(s), null, JSON.stringify(s));
+});
+
+test('the footer GitHub link: settings name a public owner/repo and the page has the hidden-until-filled link', () => {
+  ok(/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/.test(SETTINGS.githubRepo), 'githubRepo is "owner/repo"');
+  const html = readText('site/index.html');
+  if (html === null) return;   // browser run: no file access
+  ok(/id="footer-github"[^>]*rel="noopener noreferrer"[^>]*hidden/.test(html), 'footer link opens safely and starts hidden');
+});
+

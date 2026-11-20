@@ -1,0 +1,236 @@
+{
+ "logo/logo-options-1920x1080.png": {
+  "frame": 0,
+  "width": 1920,
+  "height": 1080,
+  "minFont": 28,
+  "box": [
+   70,
+   70,
+   1850,
+   976
+  ],
+  "outside": []
+ },
+ "x/banner-1500x500.png": {
+  "frame": 0,
+  "width": 1500,
+  "height": 500,
+  "minFont": 34,
+  "box": [
+   300,
+   108,
+   1200,
+   392
+  ],
+  "outside": []
+ },
+ "x/og-1200x630.png": {
+  "frame": 0,
+  "width": 1200,
+  "height": 630,
+  "minFont": 40,
+  "box": [
+   72,
+   214,
+   1128,
+   572
+  ],
+  "outside": []
+ },
+ "posts/blame-AI-1200x675.png": {
+  "frame": 0,
+  "width": 1200,
+  "height": 675,
+  "minFont": 33,
+  "box": [
+   64,
+   71,
+   1136,
+   611
+  ],
+  "outside": []
+ },
+ "posts/blame-AI-1080x1080.png": {
+  "frame": 0,
+  "width": 1080,
+  "height": 1080,
+  "minFont": 33,
+  "box": [
+   76,
+   85,
+   1004,
+   1004
+  ],
+  "outside": []
+ },
+ "posts/blame-MEME-1200x675.png": {
+  "frame": 0,
+  "width": 1200,
+  "height": 675,
+  "minFont": 33,
+  "box": [
+   64,
+   71,
+   1136,
+   611
+  ],
+  "outside": []
+ },
+ "posts/blame-MEME-1080x1080.png": {
+  "frame": 0,
+  "width": 1080,
+  "height": 1080,
+  "minFont": 33,
+  "box": [
+   76,
+   85,
+   1004,
+   1004
+  ],
+  "outside": []
+ },
+ "posts/blame-BONER-1200x675.png": {
+  "frame": 0,
+  "width": 1200,
+  "height": 675,
+  "minFont": 33,
+  "box": [
+   64,
+   71,
+   1136,
+   611
+  ],
+  "outside": []
+ },
+ "posts/blame-BONER-1080x1080.png": {
+  "frame": 0,
+  "width": 1080,
+  "height": 1080,
+  "minFont": 33,
+  "box": [
+   76,
+   85,
+   1004,
+   1004
+  ],
+  "outside": []
+ },
+ "posts/copycat-OBSYN-1200x675.png": {
+  "frame": 0,
+  "width": 1200,
+  "height": 675,
+  "minFont": 32,
+  "box": [
+   64,
+   64,
+   1136,
+   611
+  ],
+  "outside": []
+ },
+ "posts/copycat-OBSYN-1080x1080.png": {
+  "frame": 0,
+  "width": 1080,
+  "height": 1080,
+  "minFont": 32,
+  "box": [
+   76,
+   79,
+   1004,
+   1004
+  ],
+  "outside": []
+ },
+ "posts/receipts-1200x675.png": {
+  "frame": 0,
+  "width": 1200,
+  "height": 675,
+  "minFont": 32,
+  "box": [
+   64,
+   66,
+   1136,
+   611
+  ],
+  "outside": []
+ },
+ "posts/receipts-1080x1080.png": {
+  "frame": 0,
+  "width": 1080,
+  "height": 1080,
+  "minFont": 30,
+  "box": [
+   76,
+   81,
+   1004,
+   1004
+  ],
+  "outside": []
+ },
+ "video/video-1080x1080.mp4": {
+  "frames": 720,
+  "width": 1080,
+  "height": 1080,
+  "minFont": 32,
+  "box": [
+   86,
+   150,
+   994,
+   994
+  ],
+  "outside": []
+ },
+ "video/video-1920x1080.mp4": {
+  "frames": 720,
+  "width": 1920,
+  "height": 1080,
+  "minFont": 40,
+  "box": [
+   154,
+   123,
+   1766,
+   994
+  ],
+  "outside": []
+ },
+ "video/video-1920x1080-with-sound.mp4": {
+  "frames": 720,
+  "width": 1920,
+  "height": 1080,
+  "minFont": 40,
+  "box": [
+   154,
+   123,
+   1766,
+   994
+  ],
+  "outside": []
+ },
+ "cards/2026-11-19/blame-PONS-24h-1200x675.png": {
+  "frame": 0,
+  "width": 1200,
+  "height": 675,
+  "minFont": 33,
+  "box": [
+   64,
+   71,
+   1136,
+   611
+  ],
+  "outside": []
+ },
+ "cards/2026-11-19/blame-PONS-24h-1080x1080.png": {
+  "frame": 0,
+  "width": 1080,
+  "height": 1080,
+  "minFont": 33,
+  "box": [
+   76,
+   85,
+   1004,
+   1004
+  ],
+  "outside": []
+ }
+}

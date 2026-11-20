@@ -20,7 +20,35 @@ const LABELS = {
   windows: 'Time window',
   loading: 'Looking it up…',
   vs: 'vs',
+  proof: 'Check it on the explorer:',
+  pool: 'pool',
+  curve: 'launch curve',
+  startBlock: 'start block',
+  endBlock: 'end block',
 };
+
+// Proof links: every number on the card comes from these (the coin, its pair, the pool, the window's two blocks).
+const EXPLORER = 'https://robinhoodchain.blockscout.com';
+const PROOF_ADDR = /^0x[0-9a-f]{40}$/;
+function proofRow(result) {
+  const p = result.proof || {};
+  const coinSym = (result.coin && result.coin.symbol) || 'coin';
+  const pairSym = (result.pair && (result.pair.short || result.pair.symbol)) || 'pair';
+  const items = [];
+  const addr = (a, label, kind) => { if (PROOF_ADDR.test(String(a || ''))) items.push([label, `${EXPLORER}/${kind}/${a}`]); };
+  const blk = (n, label) => { if (Number.isInteger(n) && n > 0) items.push([label, `${EXPLORER}/block/${n}`]); };
+  addr(p.coin, coinSym, 'token');
+  addr(p.pair, pairSym, 'token');
+  addr(p.pool, p.onCurve ? LABELS.curve : LABELS.pool, 'address');
+  blk(p.startBlock, LABELS.startBlock);
+  blk(p.endBlock, LABELS.endBlock);
+  if (!items.length) return null;
+  const row = h('p', { class: 'bts-proof' }, LABELS.proof);
+  items.forEach(([label, url]) => row.append(' ', h('a', {
+    href: url, target: '_blank', rel: 'noopener noreferrer', class: 'bts-proof-link',
+  }, label + ' ↗', h('span', { class: 'bts-sr', text: LABELS.newTab }))));
+  return row;
+}
 
 const COUNT_MS = 900;          // headline number counts up
 const BAR_MS = 700;            // split bar slides from the middle (timing lives in card.css)
@@ -335,6 +363,8 @@ export function renderResult(el, result, opts = {}) {
   if (notes.length) body.append(h('ul', { class: 'bts-notes' }, notes.map((t) => h('li', { text: t }))));
   if (warnings.length) body.append(h('ul', { class: 'bts-warnings' }, warnings.map((t) => h('li', { text: t }))));
   if (result.asOfText) body.append(h('p', { class: 'bts-asof', text: result.asOfText }));
+  const proof = proofRow(result);
+  if (proof) body.append(proof);
 
   const card = h('article', {
     class: 'bts-card', 'data-state': 'result', 'data-case': result.caseName, 'data-kind': result.pair && result.pair.kind,

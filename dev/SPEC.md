@@ -85,7 +85,7 @@ MOTION
   loads only that one. Headline: the narrowest/heaviest cut that looks like the reference (Archivo ~wdth 62-70,
   wght 800-900; Roboto Flex ~wdth 25-40, wght 900-1000 — tune by eye). Body text: same family at normal width.
 - Headline reference: screenshot of ugly.cash at
-  <scratch>
+  (a temporary folder, since cleared)
   (proportions ONLY — do not copy anything). Observed: very heavy, squeezed letter-spacing (letters almost touch),
   the gap between the two lines is ~1/5 of the cap height (line-height ~0.85-0.9), an "O" is ~3/4 as wide as tall.
   Ours: white on black, two lines each ~SETTINGS.headline.widthOfScreen (0.9) of the viewport width; fit by measuring
@@ -96,12 +96,12 @@ MOTION
 - "Prices as of" uses the visitor's local time with a short zone name, e.g. "Prices as of 12:37 AM EST".
 - X link preview is one fixed picture for every link (site/assets/og.png); per-result previews would need a server.
 - Data: every number comes from Robinhood Chain itself (see §5). DexScreener is only used to find the coin's pools;
-  GeckoTerminal is a backup for that. Report: <project folder>/reports/1-data-check.md
+  GeckoTerminal is a backup for that. Report: reports/1-data-check.md
 
 ---------------------------------------------------------------------
 ## 2. Files and who owns them
 
-Project root: <project folder>   (note the literal "$" — quote paths in shell)
+Project root: the `$BLAME` folder on the Desktop   (note the literal "$" — quote paths in shell)
 Upload folder (what goes online): site/   — everything else is dev-only.
 
 site/index.html            PAGE builder
@@ -255,7 +255,7 @@ share.js: export function xIntentUrl(result) -> 'https://x.com/intent/post?text=
 - Built-in browser (tools mcp__Claude_Browser__*): ONLY if your task says you may. It is shared: create your OWN tab
   with tabs_create and pass that tabId on EVERY call; never touch other tabs; never use preview_start; close your tab
   when done.
-- Scratch files: <scratch>
+- Scratch files: (a temporary folder, since cleared)
 - Network: only the data sources in §5 and fonts.googleapis.com/fonts.gstatic.com. Never send personal data.
 - Do NOT run git commands (the orchestrator commits). Do NOT publish, deploy, upload, or create accounts.
 
@@ -284,11 +284,11 @@ Contracts:
      address,uint160,int24) — sqrtPrice is data word 3; v3 Initialize(uint160,int24) — word 0).
   Robinhood StockFactory 0x4783c67b63de2b358ac5951a7d41f47a38f3c046: real stock token iff tokenAddress(uid()) == token
      (uid() 0xf514ce36, tokenAddress(bytes32) 0x97bb3ce9). Official list of 212 tokens (snapshot):
-     <scratch>
+     (a temporary folder, since cleared)
 Tokens: USDG 0x5fc5360d0400a0fd4f2af552add042d716f1d168 (6 decimals; treat as exactly $1);
   WETH 0x0bd7d308f8e1639fab988df18a8011f41eacad73 (18); native ETH = 0x0000000000000000000000000000000000000000 in v4 pools;
   other $1 stables: USDe 0x5d3a…, U 0xce24…, UUSD 0x61a1…, frxUSD 0x00000000d61733e7a393a10a5b48c311abe8f1e5 — full addresses
-  are in the addresses report: <scratch>
+  are in the addresses report: (a temporary folder, since cleared)
   (JSON; result[0].result.core_tokens). NOT $1: syrupUSDG, steakUSDG, sUSDe. Fake 18-decimal "USDG" tokens exist.
 ETH in USD: WETH/USDG v3 pool 0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca (token0 WETH, token1 USDG, fee 100).
 Stock in USD: its deepest USDG pool on uniswap v3/v4 by USDG amount (precompute for all 212 into stocks.js where
@@ -326,7 +326,7 @@ computed in Python with exactly this method — the JS must reproduce them when 
   ZOLVA/ETH  c −15.797%  q −6.392%  r −10.047%     SHRP/ORBIO c −22.026% q −22.031% r +0.0075%
   ORBIO/USDG c −22.031%  q 0        r −22.031%     NOVUS/ETH  c −6.864%  q −6.392%  r −0.504%
   AI/NVDA    c −13.574%  q +2.094%  r −15.347%     STRATEGY/MSTR c −1.764% q −6.067% r +4.581%
-  (prototype: <scratch>)
+  (prototype: (a temporary folder, since cleared))
 
 ---------------------------------------------------------------------
 ## 6. Quality bar

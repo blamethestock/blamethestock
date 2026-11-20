@@ -154,6 +154,12 @@
   width: 7px; height: 7px; border-radius: 50%; background: var(--bts-coin);
 }
 .bts-asof { margin: 18px 0 0; font-size: 13px; line-height: 1.3; color: var(--bts-grey); }
+.bts-proof { margin: 8px 0 0; font-size: 13px; line-height: 1.6; color: var(--bts-grey); overflow-wrap: anywhere; }
+.bts-proof-link {
+  color: var(--bts-grey); white-space: nowrap;
+  text-decoration: underline; text-decoration-color: var(--bts-edge); text-underline-offset: 3px;
+}
+.bts-proof-link:hover { color: var(--bts-fg); text-decoration-color: currentColor; }
 
 /* ---- Buttons ---------------------------------------------------------------------------------- */
 .bts-actions {
@@ -263,7 +269,7 @@
 
 /* ---- Narrow cards (phones) -------------------------------------------------------------------- */
 @container bts-card (max-width: 520px) {
-  .bts-tab { padding: 9px 12px; min-width: 40px; }
+  .bts-tab { padding: 9px 12px; min-width: 40px; min-height: 40px; }   /* an easy thumb target on phones */
   .bts-numbers { display: grid; gap: 0; padding-top: 4px; }
   .bts-num {
     display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
@@ -281,6 +287,11 @@
 @container bts-card (max-width: 340px) {
   .bts-tabs { width: 100%; justify-content: space-between; }
   .bts-tab { flex: 1 1 0; min-width: 0; }
+}
+
+/* Touch screens: the time-window buttons are at least 40 px tall, wherever the card is. */
+@media (pointer: coarse) {
+  .bts-tab { min-height: 40px; }
 }
 
 /* The loading card can hold keyboard focus (tabindex -1) while it has no buttons: no ring around the whole card. */

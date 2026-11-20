@@ -26,6 +26,8 @@ export function buildError(err, settings = SETTINGS) {
 // PriceInput -> Result (see SPEC 3.2). opts.locale / opts.timeZone only change the "Prices as of" clock
 // (default: English, the visitor's own time zone). Input with missing or impossible prices never becomes
 // numbers: it returns buildError(...) with code 'rpc-failed' instead.
+const ADDR = /^0x[0-9a-fA-F]{40}$/;
+
 export function buildResult(pi, settings = SETTINGS, opts = {}) {
   const S = settings || SETTINGS;
   if (!pi || pi.ok !== true) return buildError(pi && pi.ok === false ? pi : { code: 'rpc-failed', detail: 'no price input' }, S);
@@ -157,5 +159,15 @@ export function buildResult(pi, settings = SETTINGS, opts = {}) {
     link: siteUrl + '/?ca=' + coinAddress + '&w=' + window,
     pool: { label: vars.poolLabel, pairSideUsd: liquidity },
     blocks: { start: block(start), end: block(end) },   // extra: which chain blocks the numbers come from
+    // What the card's proof links point at: the coin, its pair, the pool or launch curve (only when it has its own
+    // address; a v4 pool is a 32-byte id inside the PoolManager), and the window's start and end blocks.
+    proof: {
+      coin: ADDR.test(coinAddress) ? coinAddress : null,
+      pair: ADDR.test(pairAddress) && !/^0x0{40}$/.test(pairAddress) ? pairAddress : null,
+      pool: ADDR.test(text(pool.id)) ? text(pool.id).toLowerCase() : null,
+      onCurve: onCurve,
+      startBlock: block(start) ? block(start).block : null,
+      endBlock: block(end) ? block(end).block : null,
+    },
   };
 }

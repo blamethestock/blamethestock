@@ -711,3 +711,19 @@ test('every sentence, every pair kind, a grid of moves: plain, consistent, no ba
   }
   ok(n > 600, 'checked ' + n + ' results');
 });
+
+test('proof: what the card links to on the explorer', () => {
+  const res = build({ kind: 'stock', c: -0.1, q: -0.05 });
+  eq(res.proof.coin, ADDR.ZOLVA);
+  eq(res.proof.pair, ADDR.NVDA);
+  eq(res.proof.pool, null, 'the test pool id is not an address');
+  eq(res.proof.startBlock, 112293925);
+  eq(typeof res.proof.endBlock, 'number');
+  eq(build({ kind: 'eth', c: -0.1, q: -0.05 }).proof.pair, null, 'native ETH (0x000…) has no token page');
+  const pool = '0x' + 'ab'.repeat(20);
+  const withPool = buildResult({ ...input({ c: -0.1, q: -0.05 }), pool: { id: pool, label: 'ZOLVA/ETH', pairSideUsd: 50000, source: 'pons-curve' } }, SETTINGS, NY);
+  eq(withPool.proof.pool, pool);
+  eq(withPool.proof.onCurve, true);
+  const v4 = buildResult({ ...input({ c: -0.1, q: -0.05 }), pool: { id: '0x' + '7e'.repeat(32), label: 'ZOLVA/ETH', pairSideUsd: 50000 } }, SETTINGS, NY);
+  eq(v4.proof.pool, null, 'a v4 pool id is not an address page');
+});

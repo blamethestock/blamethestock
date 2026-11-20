@@ -11,9 +11,10 @@ Usage (DB = path of the local SQLite file, e.g. a scratch folder):
       Index from the head (or --to) down to --down-to (default: INDEX_FLOOR = everything), newest first.
       A later run first fills the gap from its last top up to the new head, then carries on down.
   python3 -I dev/tools/backfill_launches.py DB export OUT_DIR [--rows 5000] [--per-insert 100]
-      Writes D1-ready SQL files (INSERT OR REPLACE, newest first, ~5,000 rows per file) plus meta.sql,
-      which moves D1's cursor only where it joins on. Run meta.sql last:
-        wrangler d1 execute bts --remote --file=OUT_DIR/launches-0001.sql   (… each file, then meta.sql)
+      Writes D1-ready SQL files (INSERT OR REPLACE, newest first, ~5,000 rows per file). Each file moves D1's
+      "covered back to" cursor to its own start, only if the index already reaches the file before it. Load them
+      in order, newest first:  wrangler d1 execute bts --remote --file=OUT_DIR/launches-0001.sql  (then 0002, …)
+      meta.sql only seeds the cursor in an empty D1.
   python3 -I dev/tools/backfill_launches.py DB reskel [--all]
       Fills missing skeletons (or recomputes all with --all, e.g. after skeleton.js changed).
   python3 -I dev/tools/backfill_launches.py DB status
@@ -602,7 +603,9 @@ def cmd_export(db, args):
     if missing:
         sys.exit('%d rows have no skeleton yet; run "reskel" first' % missing)
     cur = db.execute('SELECT %s FROM launches ORDER BY block DESC, log_index DESC' % ', '.join(COLUMNS))
+    last, oldest = meta_get(db, 'last_block'), meta_get(db, 'oldest_block')
     n_file, n_rows = 0, 0
+    newer_start = (last + 1) if last is not None else None    # first block of the file before this one (newer)
     while True:
         rows = cur.fetchmany(per_file)
         if not rows:
@@ -616,16 +619,23 @@ def cmd_export(db, args):
                 part = rows[i:i + per_insert]
                 f.write('INSERT OR REPLACE INTO launches (%s) VALUES\n' % ', '.join(COLUMNS))
                 f.write(',\n'.join('(' + ', '.join(sql_value(v) for v in r) + ')' for r in part) + ';\n')
+            # Each file moves D1's "covered back to" cursor itself, and only to the start of what it covers,
+            # and only when the index already reaches the newer file before it (so the files must be loaded
+            # newest first, one after another; a file loaded out of order adds rows but never claims coverage).
+            # The last file starts at the backfill's own oldest block (it covers the empty blocks below too).
+            start = oldest if (len(rows) < per_file and oldest is not None) else rows[-1][7]
+            if newer_start is not None:
+                f.write("-- Coverage: this file is complete for blocks %d-%d.\n" % (start, newer_start - 1))
+                f.write("UPDATE meta SET value = '%d' WHERE key = 'oldest_block' AND CAST(value AS INTEGER) > %d"
+                        " AND CAST(value AS INTEGER) <= %d;\n" % (start, start, newer_start))
+            newer_start = start
         n_rows += len(rows)
-    last, oldest = meta_get(db, 'last_block'), meta_get(db, 'oldest_block')
     with open(os.path.join(out_dir, 'meta.sql'), 'w', encoding='utf-8') as f:
-        f.write('-- Run AFTER every launches-*.sql file. Moves the cursor only where this backfill joins on.\n')
-        if last is not None and oldest is not None:
+        f.write('-- Only for an empty D1 (sets the cursor if it is missing). Each launches-*.sql file moves it itself.\n')
+        if last is not None:
             f.write("INSERT INTO meta (key, value) VALUES ('last_block', '%d') ON CONFLICT(key) DO NOTHING;\n" % last)
-            f.write("INSERT INTO meta (key, value) VALUES ('oldest_block', '%d') ON CONFLICT(key) DO NOTHING;\n" % oldest)
-            f.write("UPDATE meta SET value = '%d' WHERE key = 'oldest_block' AND CAST(value AS INTEGER) > %d"
-                    " AND CAST(value AS INTEGER) <= %d;\n" % (oldest, oldest, last + 1))
-    log('wrote %d rows in %d files to %s (+ meta.sql: blocks %s-%s)' % (n_rows, n_file, out_dir, oldest, last))
+            f.write("INSERT INTO meta (key, value) VALUES ('oldest_block', '%d') ON CONFLICT(key) DO NOTHING;\n" % (last + 1))
+    log('wrote %d rows in %d files to %s (blocks %s-%s)' % (n_rows, n_file, out_dir, oldest, last))
 
 
 def cmd_status(db):

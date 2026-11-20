@@ -10,25 +10,27 @@
     X and other link previews cannot run JavaScript, so they are written here by hand.
     If you change those settings, change the same words here too.
   -->
-  <meta name="description" content="Paste a Robinhood Chain coin. See how much of its move came from what it's paired with.">
+  <meta name="description" content="Your coin didn't pump. The stock did. Paste any Robinhood Chain coin and see how much of its move was the stock.">
   <link rel="canonical" href="https://blamethestock.com/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Blame the Stock">
   <meta property="og:title" content="Blame the Stock">
-  <meta property="og:description" content="Paste a Robinhood Chain coin. See how much of its move came from what it's paired with.">
+  <meta property="og:description" content="Your coin didn't pump. The stock did. Paste any Robinhood Chain coin and see how much of its move was the stock.">
   <meta property="og:url" content="https://blamethestock.com/">
-  <meta property="og:image" content="https://blamethestock.com/assets/og.png">
+  <meta property="og:image" content="https://blamethestock.com/assets/og-1200x630.png">
+  <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Blame the Stock: how much of your coin's move came from what it's paired with.">
+  <meta property="og:image:alt" content="Your coin didn't pump. The stock did. blamethestock.com">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Blame the Stock">
-  <meta name="twitter:description" content="Paste a Robinhood Chain coin. See how much of its move came from what it's paired with.">
-  <meta name="twitter:image" content="https://blamethestock.com/assets/og.png">
+  <meta name="twitter:description" content="Your coin didn't pump. The stock did. Paste any Robinhood Chain coin and see how much of its move was the stock.">
+  <meta name="twitter:image" content="https://blamethestock.com/assets/og-1200x630.png">
+  <meta name="twitter:image:alt" content="Your coin didn't pump. The stock did. blamethestock.com">
 
-  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-  <link rel="icon" href="assets/icon-32.png" sizes="32x32" type="image/png">
-  <link rel="apple-touch-icon" href="assets/icon-180.png">
+  <link rel="icon" href="assets/favicon.ico" sizes="any">
+  <link rel="icon" href="assets/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon-180.png">
   <meta name="theme-color" content="#000000">
   <meta name="color-scheme" content="dark">
 
@@ -96,6 +98,8 @@
         </div>
         <p class="hero-note">Free. No wallet. No sign-up.</p>
         <p class="hero-trust">Read-only. We never ask you to connect a wallet, sign or approve anything.</p>
+        <!-- "N blames run today (UTC) · M in total" (src/ui/stats.js; hidden until there is a number) -->
+        <p class="hero-stats" id="blame-stats" aria-live="polite" hidden></p>
       </div>
     </section>
 
@@ -209,6 +213,11 @@
       </div>
     </section>
 
+    <!-- 6b. Receipts: the dev wallet, live from the chain (only when settings.js has the contract address and dev wallet) -->
+    <section class="section receipts" id="receipts" aria-label="Receipts" hidden>
+      <div id="receipts-body" aria-live="polite"></div>
+    </section>
+
     <!-- 7. Update log -->
     <section class="section updates" id="updates" aria-labelledby="updates-title">
       <div class="section-head" data-reveal>
@@ -230,7 +239,10 @@
     </ul>
     <div class="footer-bottom">
       <span id="footer-name"></span>
-      <a class="footer-x" id="footer-x" href="#" target="_blank" rel="noopener noreferrer" hidden>X</a>
+      <span class="footer-links">
+        <a class="footer-x" id="footer-x" href="#" target="_blank" rel="noopener noreferrer" hidden>X</a>
+        <a class="footer-x" id="footer-github" href="#" target="_blank" rel="noopener noreferrer" hidden>GitHub</a>
+      </span>
     </div>
   </footer>
 

@@ -60,7 +60,7 @@ const WORDS = {
   activityTitle: 'Activity',
   linksTitle: 'Wallet links',
   // dev
-  devWallet: 'Dev wallet', launchBuy: 'Launch buy', soldFact: 'Sold', soldNothing: 'nothing',
+  devWallet: 'Dev wallet', launchBuy: 'Launch buy', soldFact: 'Sold', soldNothing: 'nothing', ofSupply: '{pct} of supply',
   feesClaimed: 'Fees claimed', feesUnclaimed: 'Fees not yet claimed', bridgedOut: 'Bridged out',
   viaMulticall: 'Launched through Multicall3, so the dev is the wallet that sent the launch transaction.',
   stepLaunch: 'Launched the coin and bought {pct} of supply ({tokens}) for {eth}',
@@ -258,6 +258,8 @@ export function tokensText(n) {
   else s = Math.round(v).toLocaleString('en-US');
   return s + ' tokens';
 }
+const fillPct = (tpl, pct) => String(tpl || '{pct}').replace('{pct}', pct);
+
 // % of supply: 20.513 -> '20.5%', 1.1421 -> '1.14%', 0.0458 -> '0.046%'
 export function pctText(x) {
   const v = num(x);
@@ -288,8 +290,8 @@ function devView(r, W, tz) {
 
   const facts = [
     { key: 'wallet', label: W.devWallet, text: isAddr(d.address) ? shortAddr(d.address) : '?', url: addressUrl(d.address), title: isAddr(d.address) ? lower(d.address) : null },
-    { key: 'buy', label: W.launchBuy, text: buy && num(buy.pct) != null ? pctText(buy.pct) : '?', url: txUrl(buy && buy.tx) || txUrl(pons.launchTx) },
-    { key: 'sold', label: W.soldFact, text: moves == null ? '?' : num(d.soldPct) > 0 ? pctText(d.soldPct) : W.soldNothing, url: addressUrl(d.address) },
+    { key: 'buy', label: W.launchBuy, text: buy && num(buy.pct) != null ? fillPct(W.ofSupply, pctText(buy.pct)) : '?', url: txUrl(buy && buy.tx) || txUrl(pons.launchTx) },
+    { key: 'sold', label: W.soldFact, text: moves == null ? '?' : num(d.soldPct) > 0 ? fillPct(W.ofSupply, pctText(d.soldPct)) : W.soldNothing, url: addressUrl(d.address) },
     { key: 'fees', label: W.feesClaimed, text: claimed == null ? '?' : ethAmount(claimed), url: escrow || addressUrl(d.address) },
   ];
   if (unclaimed != null && unclaimed > 0) facts.push({ key: 'unclaimed', label: W.feesUnclaimed, text: ethAmount(unclaimed), url: escrow });
@@ -717,8 +719,15 @@ export function renderLinks(cardEl, links, report, settings = SETTINGS, { onRetr
     v.ignored.length ? h('details', { class: 'rc-fold rc-ignored' },
       h('summary', { text: v.ignoredTitle }),
       h('ul', { class: 'rc-ignored-list' }, v.ignored.map((g) => h('li', null, ext(g.url, { class: 'cc-link' }, g.short), ' ', h('span', { text: g.why }))))) : null,
-    v.caveat ? h('p', { class: 'rc-note', text: v.caveat }) : null));
+    v.caveat && !saidBelow(cardEl, v.caveat) ? h('p', { class: 'rc-note', text: v.caveat }) : null));
   return v;
+}
+
+// The links' caveat is usually already in the report's own caveat list at the foot of the card: say it once.
+function saidBelow(cardEl, caveat) {
+  const list = cardEl && cardEl.querySelector ? cardEl.querySelector('.cc-caveats') : null;
+  if (!list) return false;
+  return Array.from(list.querySelectorAll('li')).some((li) => li.textContent === caveat);
 }
 
 export function renderReport(el, res, settings = SETTINGS, { onRetry = null, timeZone } = {}) {
@@ -782,3 +791,56 @@ export async function showLinks(c, token, report, settings = SETTINGS, opts = {}
   renderLinks(c, answer, report, settings, { timeZone: opts.timeZone, onRetry: () => showLinks(c, token, report, settings, opts) });
   return answer;
 }
+
+// ---- Receipts: the official coin's dev wallet, live from the chain (settings.token.devWallet) -----------------
+// The same chain reading as the launch report, showing only the dev block: the launch buy, every later move (sells,
+// burns, sends, buys), fee claims and bridges, each linked to its transaction. Shown only when the wallet in
+// settings is the wallet that launched the coin on the chain; otherwise one line says so and nothing else is shown.
+const RECEIPTS_WORDS = {
+  title: 'Receipts',
+  intro: 'What the {ticker} dev wallet has done, read live from the chain. Every line links to its transaction.',
+  checking: 'Reading the dev wallet from the chain…',
+  mismatch: 'The dev wallet in our settings ({set}) isn\'t the wallet that launched {ticker} on the chain ({chain}), so no receipts are shown.',
+  unavailable: 'Receipts unavailable right now.',
+};
+export function receiptsWords(settings = SETTINGS) {
+  const custom = settings && settings.receipts && typeof settings.receipts === 'object' ? settings.receipts : {};
+  const out = { ...RECEIPTS_WORDS };
+  for (const k of Object.keys(out)) if (typeof custom[k] === 'string' && custom[k].trim()) out[k] = custom[k];
+  return out;
+}
+
+export function receiptsView(res, devWallet, settings = SETTINGS, { timeZone } = {}) {
+  const R = receiptsWords(settings);
+  const ticker = text((settings.token && settings.token.ticker) || '$BLAME', 20) || '$BLAME';
+  if (!res || res.ok !== true) return { state: 'error', text: res ? errorText(res, settings) : R.unavailable, retry: retryable(res) };
+  const v = reportView(res, settings, { timeZone });
+  const want = isAddr(devWallet) ? lower(devWallet) : null;
+  if (!want || !v.dev.address || v.dev.address !== want) {
+    return { state: 'mismatch', text: fill(R.mismatch, { ticker, set: want ? shortAddr(want) : '?', chain: v.dev.address ? shortAddr(v.dev.address) : '?' }) };
+  }
+  return { state: 'done', title: R.title, intro: fill(R.intro, { ticker }), query: v.query, dev: v.dev, asOf: v.asOf, words: v.words };
+}
+
+export async function showReceipts(el, token, devWallet, settings = SETTINGS, opts = {}) {
+  if (!el) return undefined;
+  const live = opts.live || (() => true);
+  const R = receiptsWords(settings);
+  const loading = card('loading', head(R.title, isAddr(token) ? shortAddr(token) : null),
+    h('p', { class: 'bts-progress cc-progress rc-building', text: R.checking }));
+  loading.setAttribute('aria-busy', 'true');
+  swap(el, loading);
+  const res = await loadReport(token, settings, { ...opts, live, onProgress: () => {} });
+  if (res === undefined || !live()) return undefined;
+  const v = receiptsView(res, devWallet, settings, { timeZone: opts.timeZone });
+  if (v.state !== 'done') {
+    line(el, v.text, { state: v.state, onRetry: v.retry ? () => showReceipts(el, token, devWallet, settings, opts) : null, retryText: words(settings).tryAgain });
+    return v;
+  }
+  swap(el, card('result', head(v.title, v.query),
+    h('p', { class: 'rc-receipts-intro', text: v.intro }),
+    devEl(v.dev, v.words),
+    v.asOf ? h('footer', { class: 'cc-foot' }, h('p', { class: 'cc-asof', text: v.asOf })) : null));
+  return v;
+}
+

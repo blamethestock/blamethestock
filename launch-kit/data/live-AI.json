@@ -1,0 +1,128 @@
+{
+ "pi": {
+  "ok": true,
+  "coin": {
+   "address": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+   "symbol": "AI",
+   "name": "Artificial Inu"
+  },
+  "pair": {
+   "address": "0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec",
+   "symbol": "NVDA",
+   "kind": "stock",
+   "lookalike": false
+  },
+  "pool": {
+   "id": "0xcbdfea90430a30ee4469c9902e120a77e7c7e4711d5643671c1d1957f2f1ce27",
+   "dex": "uniswap v4",
+   "label": "AI/NVDA",
+   "pairSideUsd": 580077.6787603522,
+   "createdAt": 1784051311,
+   "source": "dexscreener"
+  },
+  "window": "24h",
+  "windowSeconds": 86400,
+  "start": {
+   "block": 117156508,
+   "time": 1794978742
+  },
+  "end": {
+   "block": 117975208,
+   "time": 1795065142
+  },
+  "sinceLaunch": false,
+  "coinInPair": {
+   "start": 0.00016032922352910185,
+   "end": 0.00015609120938221666
+  },
+  "pairUsd": {
+   "start": 157.35041427309386,
+   "end": 152.0627814499421
+  },
+  "pairVia": {
+   "id": "0xd4eb21209c4d6093f80b5b84f5c45cc093ea14a3",
+   "label": "NVDA/USDG"
+  },
+  "tradedInWindow": true
+ },
+ "res": {
+  "ok": true,
+  "coin": {
+   "address": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+   "symbol": "AI"
+  },
+  "pair": {
+   "address": "0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec",
+   "symbol": "NVDA",
+   "kind": "stock",
+   "name": "the stock (NVDA)",
+   "short": "NVDA"
+  },
+  "window": "24h",
+  "windowLabel": "24h",
+  "c": -0.059149119568161046,
+  "q": -0.03360418749184013,
+  "r": -0.02643319822549961,
+  "share": 0.5606271383972227,
+  "sharePct": 56,
+  "caseName": "normal",
+  "bar": {
+   "pair": 0.5606271383972227,
+   "coin": 0.43937286160277733
+  },
+  "lead": "You're down 5.9%.",
+  "blame": "About 56% of that is the stock (NVDA).",
+  "verdict": "You're down 5.9%. About 56% of that is the stock (NVDA).",
+  "subline": "",
+  "headline": {
+   "value": -0.059149119568161046,
+   "text": "−5.9%"
+  },
+  "numbers": [
+   {
+    "key": "coin",
+    "label": "AI in $",
+    "value": -0.059149119568161046,
+    "text": "−5.9%",
+    "arrow": "↓"
+   },
+   {
+    "key": "pair",
+    "label": "NVDA",
+    "value": -0.03360418749184013,
+    "text": "−3.4%",
+    "arrow": "↓"
+   },
+   {
+    "key": "own",
+    "label": "AI vs NVDA",
+    "value": -0.02643319822549961,
+    "text": "−2.6%",
+    "arrow": "↓"
+   }
+  ],
+  "notes": [
+   "NVDA here is its token price on Robinhood Chain, which can differ from the share price.",
+   "Measured in the AI/NVDA pool."
+  ],
+  "warnings": [],
+  "asOf": 1795065142,
+  "asOfText": "Prices as of 12:12 AM EST",
+  "shareText": "My $AI is down 5.9% (24h). About 56% of that is the stock (NVDA).",
+  "link": "https://blamethestock.com/?ca=0x2e8c31162b855a2ffa90f6f8634643ad6f111e18&w=24h",
+  "pool": {
+   "label": "AI/NVDA",
+   "pairSideUsd": 580077.6787603522
+  },
+  "blocks": {
+   "start": {
+    "block": 117156508,
+    "time": 1794978742
+   },
+   "end": {
+    "block": 117975208,
+    "time": 1795065142
+   }
+  }
+ }
+}

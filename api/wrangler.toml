@@ -33,13 +33,21 @@ binding = "DB"
 database_name = "bts"
 database_id = "6973e4d6-b6d6-4717-a88e-a0c44beca8f1"
 
+# Rate limit shared by every copy of the Worker in a Cloudflare location: 60 requests a minute per visitor on
+# /mcp, /v1/copies and /v1/report (src/worker.js limit()). Counted in Cloudflare's memory only; nothing is stored.
+# Included in the Workers free plan. namespace_id is any number unique within this account.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }
+
 # Every minute: the launch indexer (new TokenLaunched events, name()/symbol()), then queued report/link jobs.
 [triggers]
 crons = ["* * * * *"]
 
 [vars]
-# The official $BLAME address, set on launch day (must match site/settings.js token.contractAddress and
-# trust.official). Empty = no official coin yet.
+# The official $BLAME address comes from site/settings.js (token.contractAddress), which the Worker is built with:
+# fill it there and redeploy. OFFICIAL here is only an override for emergencies; leave it empty.
 OFFICIAL = ""
 # Browser origins allowed by CORS (comma-separated). Anything else still gets JSON, without the CORS header.
 SITE_ORIGINS = "https://blamethestock.com,https://www.blamethestock.com,http://localhost:8765"

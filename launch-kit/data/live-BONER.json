@@ -1,0 +1,128 @@
+{
+ "pi": {
+  "ok": true,
+  "coin": {
+   "address": "0x98096d17e191b3da1d5f99a6d7b3584351b11e18",
+   "symbol": "BONER",
+   "name": "Boner Coin"
+  },
+  "pair": {
+   "address": "0xccee82fe024c36fa15e1005ede3e9e4787e23d09",
+   "symbol": "HIMS",
+   "kind": "stock",
+   "lookalike": false
+  },
+  "pool": {
+   "id": "0x9c89b04303dfa76f3f6fb02c2b77be0e8a00ab8fa00d507119acd54ab3e8640d",
+   "dex": "uniswap v4",
+   "label": "BONER/HIMS",
+   "pairSideUsd": 184736.84281175717,
+   "createdAt": 1787259586,
+   "source": "dexscreener"
+  },
+  "window": "24h",
+  "windowSeconds": 86400,
+  "start": {
+   "block": 117156508,
+   "time": 1794978742
+  },
+  "end": {
+   "block": 117975208,
+   "time": 1795065142
+  },
+  "sinceLaunch": false,
+  "coinInPair": {
+   "start": 0.00015417194303110564,
+   "end": 0.00013964070424018574
+  },
+  "pairUsd": {
+   "start": 17.76531995279531,
+   "end": 17.178430612958635
+  },
+  "pairVia": {
+   "id": "0x68d4f28f1432e0ad714658853edb2e6b0b1ac4060355ff3d169fea656b1d1c52",
+   "label": "HIMS/USDG"
+  },
+  "tradedInWindow": true
+ },
+ "res": {
+  "ok": true,
+  "coin": {
+   "address": "0x98096d17e191b3da1d5f99a6d7b3584351b11e18",
+   "symbol": "BONER"
+  },
+  "pair": {
+   "address": "0xccee82fe024c36fa15e1005ede3e9e4787e23d09",
+   "symbol": "HIMS",
+   "kind": "stock",
+   "name": "the stock (HIMS)",
+   "short": "HIMS"
+  },
+  "window": "24h",
+  "windowLabel": "24h",
+  "c": -0.12417540678879879,
+  "q": -0.033035675202929826,
+  "r": -0.09425345821832243,
+  "share": 0.2533661490474246,
+  "sharePct": 25,
+  "caseName": "normal",
+  "bar": {
+   "pair": 0.2533661490474246,
+   "coin": 0.7466338509525754
+  },
+  "lead": "You're down 12%.",
+  "blame": "About 25% of that is the stock (HIMS).",
+  "verdict": "You're down 12%. About 25% of that is the stock (HIMS).",
+  "subline": "",
+  "headline": {
+   "value": -0.12417540678879879,
+   "text": "−12%"
+  },
+  "numbers": [
+   {
+    "key": "coin",
+    "label": "BONER in $",
+    "value": -0.12417540678879879,
+    "text": "−12%",
+    "arrow": "↓"
+   },
+   {
+    "key": "pair",
+    "label": "HIMS",
+    "value": -0.033035675202929826,
+    "text": "−3.3%",
+    "arrow": "↓"
+   },
+   {
+    "key": "own",
+    "label": "BONER vs HIMS",
+    "value": -0.09425345821832243,
+    "text": "−9.4%",
+    "arrow": "↓"
+   }
+  ],
+  "notes": [
+   "HIMS here is its token price on Robinhood Chain, which can differ from the share price.",
+   "Measured in the BONER/HIMS pool."
+  ],
+  "warnings": [],
+  "asOf": 1795065142,
+  "asOfText": "Prices as of 12:12 AM EST",
+  "shareText": "My $BONER is down 12% (24h). About 25% of that is the stock (HIMS).",
+  "link": "https://blamethestock.com/?ca=0x98096d17e191b3da1d5f99a6d7b3584351b11e18&w=24h",
+  "pool": {
+   "label": "BONER/HIMS",
+   "pairSideUsd": 184736.84281175717
+  },
+  "blocks": {
+   "start": {
+    "block": 117156508,
+    "time": 1794978742
+   },
+   "end": {
+    "block": 117975208,
+    "time": 1795065142
+   }
+  }
+ }
+}
