@@ -24,6 +24,31 @@
 
 DexScreener and GeckoTerminal are only used to find which pool a coin trades in. Prices never come from them.
 
+## How the math works
+
+Full write-up with a worked example: **[blamethestock.com/math](https://blamethestock.com/math)**. The code is [`site/src/core/math.js`](site/src/core/math.js) (formula) and [`site/src/data/`](site/src/data/) (on-chain reads).
+
+- `c` = coin's change in $, `q` = pair's change in $, `r` = coin's change against its pair.
+- `(1 + c) = (1 + q) × (1 + r)`, and the pair's share = `ln(1 + q) ÷ ln(1 + c)`. The logs make the two parts add up exactly.
+- Prices: the coin's main pool (most real money on the pair's side) read on-chain with `sqrtPriceX96` (`(sqrtPriceX96 / 2^96)^2 × 10^(dec0 − dec1)`), and the pair's USDG pool, both at the **same start and end blocks**. End = latest block − 5; start = last block at or before end − window (1h, 6h, 24h, 7d).
+
+**Worked example ($AI vs NVDA, 24h, blocks [118,383,187](https://robinhoodchain.blockscout.com/block/118383187) → [119,216,653](https://robinhoodchain.blockscout.com/block/119216653)):**
+
+| | AI in NVDA | NVDA in $ | AI in $ |
+|---|---|---|---|
+| Start | 0.000148170423 | 148.967791 | 0.02207262 |
+| End | 0.0001306960964 | 135.933826 | 0.01776602 |
+
+`c = −19.511%`, `q = −8.750%`, `r = −11.793%`, share from NVDA = `ln(0.91250) ÷ ln(0.80489) = −0.091600 ÷ −0.217078 = 42%`.
+
+Recompute it yourself (Python standard library, read-only):
+
+```sh
+python3 dev/tools/recompute_split.py 0x2e8c31162b855a2ffa90f6f8634643ad6f111e18 \
+  0xcbdfea90430a30ee4469c9902e120a77e7c7e4711d5643671c1d1957f2f1ce27 \
+  0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec 0xd4eb21209c4d6093f80b5b84f5c45cc093ea14a3 118383187 119216653
+```
+
 ## Limits
 
 - **Thin pools and short windows are less reliable.** Under $5,000 on the pair's side of the pool, the card says the numbers are shaky. A coin younger than the window is measured over its whole life, and the card says so.

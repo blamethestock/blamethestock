@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How the math works · Blame the Stock</title>
+<meta name="description" content="The exact formula Blame the Stock uses, the on-chain prices it reads, and a worked example you can recompute by hand.">
+<link rel="canonical" href="https://blamethestock.com/math">
+<meta property="og:title" content="How the math works · Blame the Stock">
+<meta property="og:description" content="The exact formula, the on-chain prices it reads, and a worked example you can recompute by hand.">
+<meta property="og:image" content="https://blamethestock.com/assets/og-1200x630.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon-180.png">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<header class="doc-top"><a class="doc-brand" href="./">BLAME THE STOCK</a><a class="doc-back" href="./">Paste a coin →</a></header>
+<main class="doc">
+<h1>How the math works</h1>
+<p class="doc-lede">Every split on this site can be recomputed by hand from public Robinhood Chain data. Here is the exact formula, where every number comes from, and one real example with links so you can check it yourself.</p>
+
+<h2 id="formula">1. The formula</h2>
+<p>A coin trades against something: a stock token (like NVDA), ETH, or another coin. That is its <strong>pair</strong>. Its dollar price is its price in the pair times the pair's dollar price, so we read three changes over the window:</p>
+<ul><li><strong>c</strong> = the coin's change in dollars</li><li><strong>q</strong> = the pair's change in dollars</li><li><strong>r</strong> = the coin's change against its pair (its own move)</li></ul>
+<pre class="doc-math">(1 + c) = (1 + q) × (1 + r)      so   r = (1 + c) ÷ (1 + q) − 1
+
+ln(1 + c) = ln(1 + q) + ln(1 + r)
+
+share from the pair = ln(1 + q) ÷ ln(1 + c)
+share from the coin = 1 − share from the pair</pre>
+<p><strong>Plain English:</strong> moves multiply, so logarithms turn them into parts that add up exactly to the whole. Of the coin's move, that fraction is what its pair did; the rest is the coin on its own.</p>
+
+<h2 id="prices">2. Where the prices come from</h2>
+<ul>
+<li><strong>The coin's main pool:</strong> the pool with the most real money <em>on the pair's side</em> (pair tokens in the pool × their dollar price). DexScreener and GeckoTerminal only <em>list</em> pools; no price comes from them.</li>
+<li><strong>Coin in pair:</strong> read on Robinhood Chain. Uniswap v4: <code>StateView.getSlot0(poolId)</code> on <a href="https://robinhoodchain.blockscout.com/address/0xf3334192d15450cdd385c8b70e03f9a6bd9e673b" target="_blank" rel="noopener noreferrer">0xf333…673b ↗</a>; v3-style: the pool's <code>slot0()</code>. Price of token0 in token1 = (sqrtPriceX96 ÷ 2^96)² × 10^(decimals0 − decimals1), where token0 is the smaller address. A Pons coin still on its launch curve: quote reserve ÷ token reserve.</li>
+<li><strong>Pair in $:</strong> the pair's pool against <a href="https://robinhoodchain.blockscout.com/token/0x5fc5360d0400a0fd4f2af552add042d716f1d168" target="_blank" rel="noopener noreferrer">USDG ↗</a>, counted as exactly $1. ETH uses the WETH/USDG pool <a href="https://robinhoodchain.blockscout.com/address/0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca" target="_blank" rel="noopener noreferrer">0x52e6…71ca ↗</a>; a stock token uses its deepest USDG pool; a coin paired with a coin goes one level deeper.</li>
+<li><strong>Same blocks:</strong> both pools are read at the same start block and the same end block.</li>
+</ul>
+
+<h2 id="windows">3. Time windows</h2>
+<ul>
+<li>1h, 6h, 24h, 7d.</li>
+<li><strong>End block</strong> = latest block − 5. Older than 2 minutes: no numbers, a "data delayed" message.</li>
+<li><strong>Start block</strong> = the last block at or before (end time − window). If the pool is younger, its first block, and the card says so.</li>
+</ul>
+
+<h2 id="cases">4. Special cases</h2>
+<ul>
+<li>Paired with a dollar coin: q = 0, nothing to blame.</li>
+<li>Coin moved less than 0.5%: "basically flat", no split.</li>
+<li>Pair moved the other way by at least 0.1%: it's all the coin.</li>
+<li>Share 95–105%: "almost all of that is the pair". Above 105%: the pair moved more than the coin.</li>
+</ul>
+
+<h2 id="example">5. Worked example: $AI vs NVDA, 24h</h2>
+<p>From <strong>Nov 19, 2026 17:10:49 UTC</strong> to <strong>Nov 20, 2026 17:10:49 UTC</strong>.</p>
+<div class="doc-table"><table><tbody>
+<tr><th>Coin</th><td>$AI <a href="https://robinhoodchain.blockscout.com/token/0x2e8c31162b855a2ffa90f6f8634643ad6f111e18" target="_blank" rel="noopener noreferrer">0x2e8c…1e18 ↗</a></td></tr>
+<tr><th>Pair</th><td>NVDA <a href="https://robinhoodchain.blockscout.com/token/0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec" target="_blank" rel="noopener noreferrer">0xd060…9eec ↗</a></td></tr>
+<tr><th>Coin's pool</th><td>AI/NVDA, Uniswap v4, id <code class="doc-wrap">0xcbdfea90430a30ee4469c9902e120a77e7c7e4711d5643671c1d1957f2f1ce27</code></td></tr>
+<tr><th>Pair's $ pool</th><td>NVDA/USDG, Uniswap v3 <a href="https://robinhoodchain.blockscout.com/address/0xd4eb21209c4d6093f80b5b84f5c45cc093ea14a3" target="_blank" rel="noopener noreferrer">0xd4eb…14a3 ↗</a></td></tr>
+<tr><th>Start block</th><td><a href="https://robinhoodchain.blockscout.com/block/118383187" target="_blank" rel="noopener noreferrer">118,383,187 ↗</a></td></tr>
+<tr><th>End block</th><td><a href="https://robinhoodchain.blockscout.com/block/119216653" target="_blank" rel="noopener noreferrer">119,216,653 ↗</a></td></tr>
+</tbody></table></div>
+<div class="doc-table"><table>
+<thead><tr><th></th><th>AI in NVDA</th><th>NVDA in $</th><th>AI in $</th></tr></thead>
+<tbody>
+<tr><th>Start</th><td>0.000148170423</td><td>148.967791</td><td>0.02207262</td></tr>
+<tr><th>End</th><td>0.0001306960964</td><td>135.933826</td><td>0.01776602</td></tr>
+</tbody></table></div>
+<pre class="doc-math">c = 0.01776602 ÷ 0.02207262 − 1         = −19.511%
+q = 135.933826 ÷ 148.967791 − 1         =  −8.750%
+r = (1 − 0.19511) ÷ (1 − 0.08750) − 1   = −11.793%
+check: (1 − 0.08750) × (1 − 0.11793) − 1 = −19.511% ✓
+
+share from NVDA = ln(1 − 0.08750) ÷ ln(1 − 0.19511)
+                = −0.091600 ÷ −0.217078 = 0.422 → 42%</pre>
+<p>The site says: <strong>"You're down 19.5%. About 42% of that is the stock (NVDA)."</strong></p>
+<p><strong>Recompute it yourself</strong> (Python standard library only, read-only calls), with <a href="https://github.com/blamethestock/blamethestock/blob/main/dev/tools/recompute_split.py" target="_blank" rel="noopener noreferrer">recompute_split.py ↗</a>:</p>
+<pre class="doc-math">python3 dev/tools/recompute_split.py \
+  0x2e8c31162b855a2ffa90f6f8634643ad6f111e18 \
+  0xcbdfea90430a30ee4469c9902e120a77e7c7e4711d5643671c1d1957f2f1ce27 \
+  0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec \
+  0xd4eb21209c4d6093f80b5b84f5c45cc093ea14a3 \
+  118383187 119216653</pre>
+
+<h2 id="code">6. The code</h2>
+<ul>
+<li><a href="https://github.com/blamethestock/blamethestock/blob/main/site/src/core/math.js#L1-L29" target="_blank" rel="noopener noreferrer">site/src/core/math.js ↗</a>: the formula and special cases.</li>
+<li><a href="https://github.com/blamethestock/blamethestock/blob/main/site/src/data/chain.js#L46" target="_blank" rel="noopener noreferrer">site/src/data/chain.js ↗</a>: sqrtPriceX96 to price, block for a time.</li>
+<li><a href="https://github.com/blamethestock/blamethestock/blob/main/site/src/data/index.js" target="_blank" rel="noopener noreferrer">site/src/data/index.js ↗</a>: picks the blocks, reads both pools at the same blocks.</li>
+<li><a href="https://github.com/blamethestock/blamethestock/blob/main/site/src/data/discover.js" target="_blank" rel="noopener noreferrer">site/src/data/discover.js ↗</a>: picks the main pool.</li>
+</ul>
+
+<h2 id="limits">7. Limits</h2>
+<ul>
+<li><strong>Thin pools and short windows are less reliable.</strong> Under $5,000 on the pair's side, the card says the numbers are shaky.</li>
+<li>A stock token's on-chain price can differ from the real share price.</li>
+<li>The split shows how much of the move lines up with the pair, not why anyone traded. Not financial advice.</li>
+</ul>
+</main>
+<footer class="doc-foot"><span>Read-only. No wallet connect. Not financial advice.</span><span><a href="./">blamethestock.com</a> · <a href="https://x.com/blamethestock" target="_blank" rel="noopener noreferrer">X</a> · <a href="https://github.com/blamethestock/blamethestock" target="_blank" rel="noopener noreferrer">GitHub</a></span></footer>
+</body>
+</html>
