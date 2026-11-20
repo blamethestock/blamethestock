@@ -39,10 +39,10 @@ export const SETTINGS = {
     //   Filled -> the address shows with a ✅ Official badge, a Copy button and an explorer link, the copy check
     //             marks it as the official coin (site and API), and the launch-day update notes appear.
     // Nothing else needs switching on.
-    contractAddress: "",
+    contractAddress: "0xc15402eadae17fe62ac6bb6c135451a5584b2e82",
     // The dev wallet ("0x…"). Filled -> the Receipts section shows, live from the chain, the dev's buy, sells,
     // burns and fee claims, each with its transaction. Empty -> no Receipts section.
-    devWallet: "",
+    devWallet: "0xfbA600991E6d76a17e45Fec9F68b002c97def19D",
     ponsUrl: "",            // optional: the https:// link to $BLAME on Pons
   },
 

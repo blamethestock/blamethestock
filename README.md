@@ -4,7 +4,7 @@
 
 **Site:** [blamethestock.com](https://blamethestock.com) · **X:** [@blamethestock](https://x.com/blamethestock)
 
-**Official $BLAME CA:** coming at launch
+**Official $BLAME CA:** `0xc15402eadae17fe62ac6bb6c135451a5584b2e82` ([Blockscout](https://robinhoodchain.blockscout.com/token/0xc15402eadae17fe62ac6bb6c135451a5584b2e82))
 
 > Read-only. No wallet connect. Not financial advice.
 
