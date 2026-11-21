@@ -325,7 +325,7 @@ test('OBSYN: the four launches from the index in one request, no chain read, mar
   eq(r.status, 200);
   eq(r.json.status, 'done');
   eq(r.json.facts, 'client');
-  ok(/browser/.test(r.json.factsNote) && /npx blamethestock-mcp/.test(r.json.factsNote), r.json.factsNote);
+  ok(/browser/.test(r.json.factsNote) && !/npx/.test(r.json.factsNote), 'no unpublished package named: ' + r.json.factsNote);
   eq(r.json.matches.length, 4);
   eq(r.json.totals, { exact: 4, near: 0, total: 4, listed: 4 });
   eq(r.budget.used, 2, 'one Cache API read and one write: nothing from the chain');
@@ -430,7 +430,7 @@ test('report: the launch basics from the index (no chain read) with a note that 
   eq(r.json.token.pons.launchTime, '2026-11-17T14:14:00Z');
   eq(r.json.launch.token, TOKEN);
   ok(/^0x[0-9a-f]{64}$/.test(r.json.launch.tx) && Number.isFinite(r.json.launch.time));
-  ok(/browser/.test(r.json.note) && /npx blamethestock-mcp/.test(r.json.note));
+  ok(/browser/.test(r.json.note) && !/npx/.test(r.json.note));
   eq(r.headers['cache-control'], 'public, max-age=60');
   eq(r.budget.used, 0);
   const none = await call('/v1/report/0x00000000000000000000000000000000000000aa', { db: fakeD1(), index });
@@ -613,4 +613,24 @@ test('counter: coins checked and copies flagged, one number per day and kind; ba
   eq([...db.events.values()], [1, 3]);
   const j = (await call('/v1/stats', { db })).json;
   eq([j.today, j.checks, j.flags], [1, { today: 1, total: 1 }, { today: 3, total: 3 }]);
+});
+
+test('blamethestock.com/mcp: a Pages Function forwards to the Worker (Pages answers its own domain before Worker routes)', () => {
+  const toml = readText('api/wrangler.toml');
+  if (toml === null) return;
+  ok(!/pattern = "blamethestock\.com\//.test(toml), 'no Worker route on the main domain (Pages wins, it never runs)');
+  const fn = readText('pages/functions/mcp.js');
+  ok(fn.includes("const TARGET = 'https://api.blamethestock.com/mcp'"), 'forwards to the API Worker');
+  ok(fn.includes('export async function onRequest'), 'one handler for every method');
+  ok(!/cookie|authorization/i.test(fn.replace(/\/\/.*$/gm, '')), 'passes no cookies or credentials');
+});
+
+test('rate limit key: the forwarded visitor IP counts only with the right proxy secret', () => {
+  const key = 'k'.repeat(40);
+  const req = (h) => ({ headers: { get: (n) => (n in h ? h[n] : null) } });
+  const cf = { 'cf-connecting-ip': '198.51.100.1' };
+  eq(W.clientIp(req(cf), { proxyKey: key }), '198.51.100.1');
+  eq(W.clientIp(req({ ...cf, 'x-bts-client-ip': '203.0.113.9', 'x-bts-proxy-key': key }), { proxyKey: key }), '203.0.113.9');
+  eq(W.clientIp(req({ ...cf, 'x-bts-client-ip': '203.0.113.9', 'x-bts-proxy-key': 'wrong' }), { proxyKey: key }), '198.51.100.1', 'wrong secret: ignored');
+  eq(W.clientIp(req({ ...cf, 'x-bts-client-ip': '203.0.113.9', 'x-bts-proxy-key': '' }), { proxyKey: '' }), '198.51.100.1', 'no secret set: ignored');
 });

@@ -28,7 +28,7 @@ export const BEHIND_SECONDS = 600;    // index older than this -> a note
 const BLOCK_SECONDS = 0.1045;
 export const FACT_KEYS = ['creator', 'devBuy', 'devSold', 'fees', 'bridges', 'holders', 'liquidity', 'graduated', 'snipers'];
 export const FACTS_NOTE = 'Chain facts (dev buy and sells, fees, bridges, holders, liquidity, graduation) and the flags are read '
-  + 'from Robinhood Chain by the website in your browser, or by the local MCP package (npx blamethestock-mcp). '
+  + 'from Robinhood Chain by the website in your browser. '
   + 'This list comes from our launch index.';
 export const NOT_IN_INDEX_NOTE = 'This coin isn\'t in our launch index yet, so its launch was read straight from the chain.';
 export const NOT_PONS_NOTE = 'This coin wasn\'t launched on Pons, so it isn\'t in the list itself. Pons coins with the same name are below.';

@@ -24,6 +24,8 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = false               # only reachable on the custom domain once deployed
 
 # Custom domain, turned on at deploy time (step 3 above):
+# blamethestock.com/mcp is NOT a route here: Pages answers its own custom domain first. A small Pages Function
+# (pages/functions/mcp.js) forwards that path to this Worker instead. Secret PROXY_KEY: same value on both.
 routes = [
   { pattern = "api.blamethestock.com", custom_domain = true }
 ]

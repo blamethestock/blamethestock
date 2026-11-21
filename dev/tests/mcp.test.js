@@ -521,7 +521,7 @@ test('package.json, server.json and glama.json agree (registry name, version, np
   eq(srv.packages[0].identifier, pkg.name);
   eq(srv.packages[0].version, pkg.version);
   eq(srv.packages[0].transport, { type: 'stdio' });
-  eq(srv.remotes, [{ type: 'streamable-http', url: 'https://api.blamethestock.com/mcp' }]);
+  eq(srv.remotes, [{ type: 'streamable-http', url: 'https://blamethestock.com/mcp' }]);
   eq(pkg.bin['blamethestock-mcp'], 'src/index.js');
   eq(pkg.license, 'MIT');
   ok(/Copyright \(c\) \d{4} Blame the Stock/.test(readPkgFile('LICENSE')), 'LICENSE copyright');
@@ -535,7 +535,7 @@ test('package.json, server.json and glama.json agree (registry name, version, np
 test('README: install snippets, read-only and not-advice note, no machine paths', () => {
   const md = readPkgFile('README.md');
   if (md == null) return;
-  ok(md.includes('claude mcp add --transport http blamethestock https://api.blamethestock.com/mcp'), 'Claude Code (hosted)');
+  ok(md.includes('claude mcp add --transport http blamethestock https://blamethestock.com/mcp'), 'Claude Code (hosted)');
   ok(md.includes('"args": ["-y", "blamethestock-mcp"]'), 'Claude Desktop JSON');
   ok(md.includes('npx -y blamethestock-mcp'), 'npx stdio');
   ok(/Read-only\. Not financial advice\./.test(md), 'note');
@@ -571,12 +571,12 @@ test('check_copycats hosted: the index list with launch info and a clear note wh
   const s = text(r);
   ok(!r.isError);
   ok(s.includes(M.HOSTED_NOTE), s.slice(0, 400));
-  ok(/website|blamethestock\.com/.test(M.HOSTED_NOTE) && M.HOSTED_NOTE.includes('npx -y blamethestock-mcp'));
+  ok(/website|blamethestock\.com/.test(M.HOSTED_NOTE) && !M.HOSTED_NOTE.includes('npx'), 'the npm package is not published yet: not offered');
   ok(/launch index as of/.test(s));
   ok(/launched 2026-11-17 14:02:15 UTC; launch block \d+; chain facts not read here/.test(s), s);
   eq(r.structuredContent.facts, 'client');
   eq(r.structuredContent.matches.length, 4);
-  eq(r.structuredContent.localPackage, 'npx -y blamethestock-mcp');
+  eq(r.structuredContent.localPackage, undefined);
   proofsOk(s, 'copycats hosted');
   wordsOk(s, 'copycats hosted');
 });
@@ -608,7 +608,7 @@ test('blame_split hosted: a clear note with the card link and the local package,
   ok(!r.isError);
   eq(r.structuredContent.status, 'unavailable-hosted');
   eq(r.structuredContent.link, 'https://blamethestock.com/?ca=' + REAL + '&w=6h');
-  ok(text(r).includes('npx -y blamethestock-mcp') && text(r).includes(r.structuredContent.link));
+  ok(!text(r).includes('npx') && text(r).includes(r.structuredContent.link));
   wordsOk(text(r), 'split hosted');
   const local = await M.runBlameSplit({ token: REAL }, { fetchPriceInput: async () => priceInput(), cache: null });
   ok(local.structuredContent.ok === true, 'outside the Worker it still computes the split');

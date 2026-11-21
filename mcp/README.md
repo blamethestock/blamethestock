@@ -31,18 +31,20 @@ there is none.
 
 ### Hosted (no install)
 
-The server runs at `https://api.blamethestock.com/mcp` (Streamable HTTP, no login).
+The server runs at `https://blamethestock.com/mcp` (Streamable HTTP, no login; also at `https://api.blamethestock.com/mcp`).
 
 **Claude Code**
 
 ```sh
-claude mcp add --transport http blamethestock https://api.blamethestock.com/mcp
+claude mcp add --transport http blamethestock https://blamethestock.com/mcp
 ```
 
 **Claude Desktop** and other clients that take a remote URL: add a custom connector with the URL
-`https://api.blamethestock.com/mcp`.
+`https://blamethestock.com/mcp`.
 
-### Local (stdio, via npx)
+### Local (stdio, via npx): not published to npm yet
+
+The commands below work once the package is published; until then, run it from this folder with `node src/index.js`.
 
 This package runs a small local server that reads Robinhood Chain from your machine (its public RPC and explorer)
 and asks the hosted API only for its launch index. A launch report can take up to a minute. It needs Node.js 20 or

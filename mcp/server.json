@@ -28,7 +28,7 @@
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://api.blamethestock.com/mcp"
+      "url": "https://blamethestock.com/mcp"
     }
   ]
 }

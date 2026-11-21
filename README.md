@@ -70,9 +70,35 @@ python3 dev/tools/recompute_split.py 0x2e8c31162b855a2ffa90f6f8634643ad6f111e18 
 | Copycat alerts: Pons launches of the last 24 h using the name or ticker of a coin that already graduated, with a ready-to-post warning | **Live** |
 | Graduation radar: ETH-paired Pons coins of the last 48 h closest to graduating (% of 4.2 ETH), with holders, dev % and first-buyer % | **Live** |
 | Live counter: blames run, coins checked and copies flagged, today (UTC) and all time; one number per day, nothing about visitors | **Live** |
-| MCP server, hosted at `https://api.blamethestock.com/mcp` (tools: `blame_split`, `check_copycats`, `launch_report`) | **Live** |
+| MCP server for AI assistants, hosted at `https://blamethestock.com/mcp` (tools: `blame_split`, `check_copycats`, `launch_report`; see limits below) | **Live** |
 | MCP npm package (`npx blamethestock-mcp`) and directory listings | Planned |
 | $BLAME receipts on the site (dev buy, sells, burns, fee claims, live from the chain) | **Live** |
+
+## Use it from an AI assistant (MCP)
+
+A hosted, read-only MCP server: **`https://blamethestock.com/mcp`** (Streamable HTTP, no login, no key). The same server also answers at `https://api.blamethestock.com/mcp`.
+
+**Claude Code**
+
+```sh
+claude mcp add --transport http blamethestock https://blamethestock.com/mcp
+```
+
+**Claude Desktop, Claude.ai and other clients that take a remote URL:** add a custom connector with the URL `https://blamethestock.com/mcp`.
+
+**Cursor and clients with a JSON config:**
+
+```json
+{ "mcpServers": { "blamethestock": { "url": "https://blamethestock.com/mcp" } } }
+```
+
+| Tool | Input | What the hosted server returns today |
+|---|---|---|
+| `check_copycats` | a ticker or 0x address | Every Pons launch with the same or a look-alike name from our launch index, with launch time, dev wallet and proof links, and the official $BLAME marked. |
+| `launch_report` | a Pons coin's 0x address | The coin's launch basics from our index (launch tx, block, dev wallet), official or not. |
+| `blame_split` | a 0x address, window `1h`/`6h`/`24h`/`7d` | A link to the coin's card on the website. |
+
+**Limits, plainly:** Robinhood Chain's public node refuses requests from Cloudflare's network, where the hosted server runs, so the hosted tools can't read live chain facts (prices at exact blocks, dev sells, fees, first buyers, holders). Each answer says so and links to the website, where your browser reads the chain and shows the full result. A local package that reads the chain on your own machine is in `mcp/` but **not published to npm yet**. Read-only: no tool can trade, sign or touch a wallet. Not financial advice.
 
 ## $BLAME
 
@@ -91,6 +117,7 @@ The only official contract address is the one on [blamethestock.com](https://bla
 |---|---|
 | `site/` | The website. Static files; `site/settings.js` holds every text and switch. |
 | `api/` | The Cloudflare Worker at `api.blamethestock.com`: the Pons launch index, copy check, launch report, a blame counter (no personal data) and the hosted MCP server. |
+| `pages/` | One Pages Function: forwards `blamethestock.com/mcp` to the API's MCP server. |
 | `mcp/` | The MCP stdio package (`blamethestock-mcp`). |
 | `dev/` | Tests (`sh dev/run-tests.sh`), a local preview server and data tools. |
 | `docs/` | API reference and MCP publishing notes. |

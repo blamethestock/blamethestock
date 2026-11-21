@@ -1,0 +1,9 @@
+POST:
+Shipped: Blame the Stock for AI assistants
+
+Add blamethestock.com/mcp to Claude or any MCP client and ask it to check a Robinhood Chain coin for copies or pull its launch basics. Read-only, no key, no login.
+
+Install steps in our README.
+
+REPLY:
+Setup: https://github.com/blamethestock/blamethestock#use-it-from-an-ai-assistant-mcp

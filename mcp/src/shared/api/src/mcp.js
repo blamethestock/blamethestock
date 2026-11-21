@@ -53,8 +53,7 @@ export const NOT_ADVICE = 'Read-only on-chain facts from Robinhood Chain; not fi
 export const LINKS_CAVEAT = 'Wallets funded through exchanges, bridges or privacy tools can\'t be linked.';
 export const LOCAL_PACKAGE = 'npx -y blamethestock-mcp';
 export const HOSTED_NOTE = 'The hosted server can\'t read Robinhood Chain right now (its public RPC refuses Cloudflare\'s network), so '
-  + 'this answer comes from our launch index only. For the full facts and flags, open ' + SITE + ' (your browser reads the chain) '
-  + 'or run the local package (' + LOCAL_PACKAGE + '), which reads the chain on your machine.';
+  + 'this answer comes from our launch index only. For the full facts and flags, open ' + SITE + ' (your browser reads the chain).';
 const SPLIT_CACHE_SECONDS = 60;
 const WINDOWS = Object.keys(WINDOW_SECONDS);   // ['1h', '6h', '24h', '7d']
 const MAX_TEXT_ROWS = 8;                       // matches / moves / wallets listed in the text summary (JSON has all)
@@ -253,11 +252,10 @@ export async function runBlameSplit({ token, window } = {}, deps = {}) {
     // Measured from a Worker: with the official RPC refusing Cloudflare, the price reads at exact blocks fail
     // (publicnode keeps only the newest blocks, dRPC caps logs at 100 blocks). Say so instead of failing slowly.
     const link = SITE + '/?ca=' + addr + '&w=' + w;
-    const json = { ok: false, status: 'unavailable-hosted', token: addr, window: w, link, localPackage: LOCAL_PACKAGE,
+    const json = { ok: false, status: 'unavailable-hosted', token: addr, window: w, link,
       message: 'blame_split needs prices read from Robinhood Chain at exact blocks, which the hosted server can\'t do right now.',
       note: HOSTED_NOTE, disclaimer: NOT_ADVICE };
-    const text = json.message + ' Open the card on the website: ' + link + ' (your browser reads the chain), or run the local package ('
-      + LOCAL_PACKAGE + ') for the same answer here. ' + NOT_ADVICE;
+    const text = json.message + ' Open the card on the website: ' + link + ' (your browser reads the chain). ' + NOT_ADVICE;
     return toolResult(text, json);
   }
 
@@ -370,7 +368,7 @@ export async function runCheckCopycats({ query } = {}, deps = {}) {
     return toolError((r && r.message) || 'The copy check is unavailable right now. Try again in a minute.', { code: (r && r.code) || 'unavailable' });
   }
   if (r.status === 'building') return buildingResult('check_copycats', r.progress, { query: q });
-  const json = r.facts === 'client' || r.facts === 'pending' ? { ...r, note: HOSTED_NOTE, localPackage: LOCAL_PACKAGE, disclaimer: NOT_ADVICE } : { ...r, disclaimer: NOT_ADVICE };
+  const json = r.facts === 'client' || r.facts === 'pending' ? { ...r, note: HOSTED_NOTE, disclaimer: NOT_ADVICE } : { ...r, disclaimer: NOT_ADVICE };
   return toolResult(copiesSummary(r), json);
 }
 
@@ -541,7 +539,7 @@ export async function runLaunchReport({ token } = {}, deps = {}) {
   }
   if (report.status === 'building') return buildingResult('launch_report', report.progress, { token: addr, links: null, links_status: 'building' });
   if (report.status === 'basics') {
-    const json = { ...report, links: null, links_status: 'client', note: HOSTED_NOTE, localPackage: LOCAL_PACKAGE, disclaimer: NOT_ADVICE };
+    const json = { ...report, links: null, links_status: 'client', note: HOSTED_NOTE, disclaimer: NOT_ADVICE };
     return toolResult(basicsSummary(report), json);
   }
 

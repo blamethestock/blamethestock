@@ -615,10 +615,9 @@ async function radarBody(deps) {
 // GET /v1/report/{token} and /v1/report/{token}/links
 // =============================================================================================================
 const REPORT_NOTE = 'The launch report (dev moves, first buyers, fees, bridges, activity) is read from Robinhood Chain '
-  + 'by the website in your browser, or by the local MCP package (npx blamethestock-mcp). This answer holds the coin\'s '
+  + 'by the website in your browser. This answer holds the coin\'s '
   + 'launch from our index.';
-const LINKS_NOTE = 'Wallet links are checked by the website in your browser, or by the local MCP package '
-  + '(npx blamethestock-mcp), after the launch report.';
+const LINKS_NOTE = 'Wallet links are checked by the website in your browser, after the launch report.';
 
 // The coin's launch row from the index -> the report's basics (status 'basics'; nothing read from the chain).
 function reportBasicsOf(row, addr, deps) {
@@ -776,7 +775,7 @@ async function handle(request, env, ctx, deps) {
 // If the binding is missing or fails, the request is let through on the first layer alone (never a false 429).
 async function limit(request, deps) {
   if (deps.limitResult) return deps.limitResult;     // one count per request
-  const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || 'unknown';
+  const ip = clientIp(request, deps);
   let res = deps.limiter ? deps.limiter.hit(ip, deps.now) : { ok: true };
   if (res.ok && deps.rateBinding && typeof deps.rateBinding.limit === 'function') {
     try {
@@ -786,6 +785,15 @@ async function limit(request, deps) {
   }
   deps.limitResult = res;
   return res;
+}
+// blamethestock.com/mcp is a tiny Pages Function that forwards to this Worker (pages/functions/mcp.js). Its requests
+// all come from Cloudflare, so it passes the visitor's IP (memory only, like every IP here) with a shared secret
+// (PROXY_KEY on both sides). Without the right secret the header is ignored, so nobody can pick their own IP.
+function clientIp(request, deps) {
+  const h = request.headers;
+  const fwd = h.get('x-bts-client-ip');
+  if (fwd && deps.proxyKey && h.get('x-bts-proxy-key') === deps.proxyKey) return fwd;
+  return h.get('cf-connecting-ip') || h.get('x-real-ip') || 'unknown';
 }
 function rateLimited(cors, deps, rl = deps.limitResult) {
   const wait = (rl && rl.resetSeconds) || 60;
@@ -868,6 +876,7 @@ function requestDeps(request, env, ctx, extra = {}) {
     cache: cfCache(budget, url.origin, ctx),
     limiter,
     rateBinding: env && env.RATE_LIMITER ? env.RATE_LIMITER : null,
+    proxyKey: env && typeof env.PROXY_KEY === 'string' && env.PROXY_KEY.length >= 32 ? env.PROXY_KEY : '',
     ...extra,
   };
 }
@@ -878,7 +887,7 @@ const internals = {
   VERSION, DEFAULT_ORIGINS, RATE, TTL, BROWSER_SECONDS, HEALTH_SECONDS, INDEXER_SUBREQUESTS, INDEXER_LOG_SPAN, INDEXER_LOG_REQUESTS,
   INDEXER_MAX_BLOCKS, INDEXER_MAX_ROWS, AVOID, REPORT_NOTE, LINKS_NOTE,
   SQL_SCHEMA, SQL_COUNT_ADD, SQL_COUNT_GET, SQL_EVENT_ADD, SQL_EVENT_GET, STATS_SECONDS, SQL_META, SQL_OLDEST_TIME, SQL_NEWEST_AT, SQL_CACHE_GET, SQL_CACHE_PUT, SQL_CACHE_PURGE, SQL_JOBS_PURGE,
-  rowCachedIndex, parseUrl, allowedOrigins, corsHeaders, preflightHeaders, hashKey, createRateLimiter, settingsFor, statusFor,
+  rowCachedIndex, clientIp, parseUrl, allowedOrigins, corsHeaders, preflightHeaders, hashKey, createRateLimiter, settingsFor, statusFor,
   jsonAnswer, toResponse, routedFetch, withBudget, useAsyncLocalStorage, requestLanes, _resetForTests, ensureTables, cfCache, d1Get, d1Put, cacheGet,
   cachePut, healthBody, countBody, statsBody, copiesBody, reportBody, linksBody, reportBasicsOf, handle, runScheduled, requestDeps,
 };
